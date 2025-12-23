@@ -146,6 +146,19 @@
     else state.selectedIds = state.selectedIds.concat(id);
   }
 
+  function selectedItems() {
+    return state.selectedIds.map(findItem).filter(Boolean);
+  }
+
+  function updateActionButtons(){
+    const sel = selectedItems();
+    const single = sel.length === 1;
+
+    if (renameBtn) renameBtn.classList.toggle("btn-disabled", !single);
+    if (viewBtn) viewBtn.classList.toggle("btn-disabled", !single);
+    if (deleteBtn) deleteBtn.classList.toggle("btn-disabled", sel.length === 0);
+  }
+
   function render() {
     buildBreadcrumb();
 
@@ -155,15 +168,15 @@
     if (selectAll) selectAll.checked = allChecked;
 
     tableBody.innerHTML = visible.map(item => {
-      const checked = isSelected(item.id) ? "checked" : "";
       const rowClass = isSelected(item.id) ? "row selected" : "row";
+      const iconClass = item.type === "folder" ? "icon-folder" : "icon-file";
       return `
         <div class="${rowClass}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
           <div class="col col-check">
-            <input class="check" type="checkbox" ${checked} />
+            <span class="select-box"></span>
           </div>
           <div class="col col-name">
-            <span class="item-icon"></span>
+            <span class="${iconClass}"></span>
             ${escapeHtml(item.name)}
           </div>
           <div class="col col-mod">${escapeHtml(item.modified || "")}</div>
@@ -173,13 +186,11 @@
     }).join("");
 
     Array.from(tableBody.querySelectorAll(".row")).forEach(row => {
-      row.addEventListener("click", (e) => {
+      row.addEventListener("click", () => {
         const id = row.getAttribute("data-id");
         if (!id) return;
 
-        const clickedCheckbox = e.target && e.target.classList && e.target.classList.contains("check");
-        if (!clickedCheckbox) toggleSelected(id);
-
+        toggleSelected(id);
         saveState();
         render();
       });
@@ -195,11 +206,10 @@
         }
       });
     });
+
+    updateActionButtons();
   }
 
-  function selectedItems() {
-    return state.selectedIds.map(findItem).filter(Boolean);
-  }
 
   function requireSingleSelection() {
     const sel = selectedItems();
