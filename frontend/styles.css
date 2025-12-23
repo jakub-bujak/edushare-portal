@@ -513,3 +513,25 @@ body{
   outline: 3px dashed var(--border);
   outline-offset: -6px;
 }
+
+.profile-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.profile-label {
+  font-size: 28px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.profile-icon {
+  width: 48px;
+  height: 48px;
+}
+
+.profile-name {
+  font-size: 28px;
+  font-weight: 600;
+}

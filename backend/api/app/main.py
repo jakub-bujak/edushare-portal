@@ -15,7 +15,27 @@ from datetime import datetime, timedelta
 from .models import ShareLink
 from .schemas import CreateShareLinkIn
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="EduShare API (Local Dev)")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5500",  # VS Code Live Server default
+        "http://127.0.0.1:5500",
+        "http://localhost:5173",  # Vite default
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",  # React dev default
+        "http://127.0.0.1:3000",
+        "http://localhost:8080",  # some dev servers
+        "http://127.0.0.1:8080",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 STORAGE_DIR = os.path.join(os.path.dirname(__file__), "..", "storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)

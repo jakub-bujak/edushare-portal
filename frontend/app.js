@@ -1,18 +1,24 @@
 (function () {
-  const loginForm = document.getElementById("loginForm");
-  if (loginForm) {
+  // ---------- LOGIN PAGE ----------
+    const loginForm = document.getElementById("loginForm");
+    if (loginForm) {
     loginForm.addEventListener("submit", function (e) {
-      e.preventDefault();
-      window.location.href = "portal.html";
+        e.preventDefault();
+        const email = document.getElementById("email")?.value?.trim() || "alice";
+        sessionStorage.setItem("edushare_user", email);
+        window.location.href = "portal.html";
     });
     return;
-  }
+    }
 
+
+  // ---------- PORTAL PAGE ----------
   const tableBody = document.getElementById("tableBody");
   const searchInput = document.getElementById("searchInput");
   const breadcrumbEl = document.getElementById("breadcrumb");
   const backBtn = document.getElementById("backBtn");
   const selectAll = document.getElementById("selectAll");
+  const profileNameEl = document.getElementById("profileName");
 
   const backToLoginBtn = document.getElementById("backToLoginBtn");
   const uploadBtn = document.getElementById("uploadBtn");
@@ -42,6 +48,60 @@
 
   if (!tableBody) return;
 
+  // ---------- API HELPERS ----------
+  const API_BASE = "http://127.0.0.1:8000";
+
+
+  function getUser() {
+    return sessionStorage.getItem("edushare_user") || "alice";
+  }
+
+  async function apiFetch(path, opts = {}) {
+    const headers = new Headers(opts.headers || {});
+    headers.set("X-User", getUser());
+
+    if (opts.json) {
+      headers.set("Content-Type", "application/json");
+      opts.body = JSON.stringify(opts.json);
+      delete opts.json;
+    }
+
+    const res = await fetch(API_BASE + path, { ...opts, headers });
+
+    if (!res.ok) {
+      let msg = `${res.status} ${res.statusText}`;
+      try {
+        const data = await res.json();
+        msg = data.detail || JSON.stringify(data);
+      } catch {}
+      throw new Error(msg);
+    }
+
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("application/json")) return res.json();
+    return res.text();
+  }
+
+  async function refreshProfileName() {
+  if (!profileNameEl) return;
+
+  // If viewing via share link, show "Guest"
+  if (state.shareToken) {
+    profileNameEl.textContent = "Guest";
+    return;
+  }
+
+  try {
+    const me = await apiFetch("/me"); // uses X-User header already
+    profileNameEl.textContent = me.display_name || state.user || "Unknown";
+  } catch {
+    // If /me fails (e.g., backend down), fall back
+    profileNameEl.textContent = state.user || "Unknown";
+  }
+}
+
+
+  // ---------- UI HELPERS ----------
   function escapeHtml(str) {
     return String(str)
       .replaceAll("&", "&amp;")
@@ -51,52 +111,60 @@
       .replaceAll("'", "&#039;");
   }
 
-  function uid() {
-    return Math.random().toString(16).slice(2) + Date.now().toString(16);
-  }
-
-  function nowStamp() {
-    const d = new Date();
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} - ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
-  function loadState() {
-    try {
-      const raw = localStorage.getItem("edushare_state_v2");
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-
-  function saveState() {
-    localStorage.setItem("edushare_state_v2", JSON.stringify(state));
-  }
-
-  const defaultState = {
-    user: "Jakub Bujak",
+  // ---------- STATE (SERVER BACKED) ----------
+  const state = {
+    user: getUser(),
     rootId: "root",
     currentFolderId: "root",
     selectedIds: [],
     sortKey: "name",
     sortDir: "asc",
-    shareMode: null, 
-    shares: {},     
-    items: [
-      { id: uid(), type: "folder", name: "Year 4", parentId: "root", modified: nowStamp(), by: "Prof.Glass" },
-      { id: uid(), type: "folder", name: "COM682", parentId: "root", modified: nowStamp(), by: "Prof.Glass" },
-      { id: uid(), type: "file", name: "Sample Wireframes", parentId: "root", modified: nowStamp(), by: "Prof.Glass" }
-    ]
+    shareMode: null,   // UI-only: "view" | "edit" | null
+    shareToken: null,  // token from URL when in share mode
+    items: [],         // current folder listing from API
   };
 
-  const state = loadState() || defaultState;
-  state.shares = state.shares || {};
-  saveState();
+  function saveUiState() {
+    sessionStorage.setItem(
+      "edushare_ui",
+      JSON.stringify({
+        currentFolderId: state.currentFolderId,
+        sortKey: state.sortKey,
+        sortDir: state.sortDir,
+        shareMode: state.shareMode,
+        shareToken: state.shareToken,
+      })
+    );
+  }
+
+  function loadUiState() {
+    try {
+      const raw = sessionStorage.getItem("edushare_ui");
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s.currentFolderId) state.currentFolderId = s.currentFolderId;
+      if (s.sortKey) state.sortKey = s.sortKey;
+      if (s.sortDir) state.sortDir = s.sortDir;
+      if (s.shareMode) state.shareMode = s.shareMode;
+      if (s.shareToken) state.shareToken = s.shareToken;
+    } catch {}
+  }
+
+  function mapItemFromApi(x) {
+    return {
+      id: String(x.id),
+      type: x.type,
+      name: x.name,
+      parentId: x.parent_id == null ? "root" : String(x.parent_id),
+      modified: "", // if your ItemOut has timestamps, map them here
+      by: "",       // could be owner display name later
+      mime: x.mime_type || "application/octet-stream",
+      sizeBytes: x.size_bytes || 0,
+    };
+  }
 
   function findItem(id) {
-    return state.items.find((x) => x.id === id && !x.isDeleted) || null;
+    return state.items.find((x) => x.id === id) || null;
   }
 
   function currentFolderItem() {
@@ -106,51 +174,81 @@
     return item;
   }
 
+  // For root/back button we keep a simple client-side stack.
+  // (We don’t have a server endpoint to ask for a folder’s parent yet.)
+  const navStack = [];
+
   function parentFolderId() {
-    const cur = currentFolderItem();
-    if (!cur) return state.rootId;
-    return cur.parentId || state.rootId;
+    if (navStack.length === 0) return state.rootId;
+    return navStack[navStack.length - 1] || state.rootId;
   }
 
+  async function refreshCurrentFolder() {
+    state.user = getUser();
+    await refreshProfileName();
+    state.selectedIds = [];
+
+    // Share link mode: list folder via token
+    if (state.shareToken) {
+      const kids = await apiFetch(`/s/${encodeURIComponent(state.shareToken)}/children`);
+      state.items = kids.map(mapItemFromApi);
+      render();
+      return;
+    }
+
+    // Normal mode
+    if (state.currentFolderId === state.rootId) {
+      const rootItems = await apiFetch(`/root`);
+      state.items = rootItems.map(mapItemFromApi);
+    } else {
+      const kids = await apiFetch(`/folders/${encodeURIComponent(state.currentFolderId)}/children`);
+      state.items = kids.map(mapItemFromApi);
+    }
+
+    render();
+  }
+
+  // ---------- BREADCRUMB ----------
   function buildBreadcrumb() {
     if (!breadcrumbEl) return;
 
-    const chain = [];
-    chain.push({ id: state.rootId, name: "Public Folder" });
+    // Minimal breadcrumb (root + current folder name).
+    // Full chain would require an API to get parents.
+    const parts = [{ id: state.rootId, name: "Public Folder" }];
+    const cur = currentFolderItem();
+    if (cur) parts.push({ id: cur.id, name: cur.name });
 
-    let node = currentFolderItem();
-    const stack = [];
-    while (node) {
-      stack.push(node);
-      node = node.parentId && node.parentId !== state.rootId ? findItem(node.parentId) : null;
-    }
-    stack.reverse().forEach((x) => chain.push(x));
-
-    breadcrumbEl.innerHTML = chain
-      .map((f, idx) => {
-        const isLast = idx === chain.length - 1;
-        if (isLast) return escapeHtml(f.name);
-        return `<a class="crumb" href="#" data-id="${escapeHtml(f.id)}">${escapeHtml(f.name)}</a> &gt; `;
+    breadcrumbEl.innerHTML = parts
+      .map((p, idx) => {
+        const isLast = idx === parts.length - 1;
+        if (isLast) return escapeHtml(p.name);
+        return `<a class="crumb" href="#" data-id="${escapeHtml(p.id)}">${escapeHtml(p.name)}</a> &gt; `;
       })
       .join("");
 
     Array.from(breadcrumbEl.querySelectorAll(".crumb")).forEach((a) => {
-      a.addEventListener("click", (e) => {
+      a.addEventListener("click", async (e) => {
         e.preventDefault();
         const id = a.getAttribute("data-id");
         if (!id) return;
+
+        // reset navigation stack when clicking root
+        if (id === state.rootId) navStack.length = 0;
+
         state.currentFolderId = id;
         state.selectedIds = [];
-        saveState();
-        render();
+        saveUiState();
+        await refreshCurrentFolder().catch((err) => alert(err.message));
       });
     });
   }
 
+  // ---------- LIST / FILTER / SORT ----------
   function getVisibleItems() {
     const q = (searchInput ? searchInput.value : "").trim().toLowerCase();
-    const inFolder = state.items.filter((x) => x.parentId === state.currentFolderId && !x.isDeleted);
-    const filtered = q ? inFolder.filter((x) => x.name.toLowerCase().includes(q)) : inFolder;
+
+    // state.items already represents current folder listing (server side)
+    const filtered = q ? state.items.filter((x) => x.name.toLowerCase().includes(q)) : state.items;
 
     return filtered.slice().sort((a, b) => {
       const av = (a[state.sortKey] || "").toString().toLowerCase();
@@ -174,6 +272,7 @@
     return state.selectedIds.map(findItem).filter(Boolean);
   }
 
+  // ---------- CONTEXT MENU ----------
   function openCtx(x, y) {
     if (!ctxMenu) return;
     ctxMenu.style.left = x + "px";
@@ -186,6 +285,7 @@
     ctxMenu.classList.add("hidden");
   }
 
+  // ---------- VIEW MODAL ----------
   function openViewModal(title, html) {
     if (!viewModal || !viewTitle || !viewBody) return;
     viewTitle.textContent = title || "View";
@@ -199,9 +299,10 @@
     if (viewBody) viewBody.innerHTML = "";
   }
 
+  // ---------- SHARE MODAL ----------
   function getSharePerm() {
     const el = document.querySelector('input[name="sharePerm"]:checked');
-    return (el && el.value) ? el.value : "view";
+    return el && el.value ? el.value : "view";
   }
 
   function openShareModal() {
@@ -216,25 +317,19 @@
     shareModal.classList.add("hidden");
   }
 
-  function makeToken() {
-    return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-  }
-
-  function createShareLinkForSelected() {
+  async function createShareLinkForSelected() {
     const sel = requireSingleSelection();
     if (!sel) return;
 
-    const token = makeToken();
-    const perm = getSharePerm();
+    const perm = getSharePerm(); // "view" | "edit"
+    const role = perm === "edit" ? "editor" : "viewer";
 
-    state.shares[token] = {
-      itemId: sel.id,
-      perm,
-      createdBy: state.user,
-      createdAt: nowStamp()
-    };
-    saveState();
+    const data = await apiFetch(`/share-links/${encodeURIComponent(sel.id)}`, {
+      method: "POST",
+      json: { role, expires_in_hours: null },
+    });
 
+    const token = data.token;
     const url = new URL(window.location.href);
     url.searchParams.set("share", token);
     if (shareLink) shareLink.value = url.toString();
@@ -256,37 +351,19 @@
     const token = url.searchParams.get("share");
     if (!token) return;
 
-    const rec = state.shares && state.shares[token];
-    if (!rec) {
-      alert("Invalid or expired share link.");
-      return;
-    }
-
-    const item = findItem(rec.itemId);
-    if (!item) {
-      alert("Shared item not found.");
-      return;
-    }
-
-    state.shareMode = rec.perm; 
-
-    if (item.type === "folder") {
-      state.currentFolderId = item.id;
-      state.selectedIds = [];
-      saveState();
-      return;
-    }
-
-    if (item.type === "file") {
-      state.selectedIds = [item.id];
-      saveState();
-    }
+    state.shareToken = token;
+    state.shareMode = "view"; // UI-only; server enforces permissions anyway
+    state.currentFolderId = state.rootId;
+    navStack.length = 0;
+    saveUiState();
   }
 
+  // ---------- ACTION BUTTONS ----------
   function updateActionButtons() {
     const sel = selectedItems();
     const single = sel.length === 1;
-    const readOnly = state.shareMode === "view";
+
+    const readOnly = state.shareMode === "view" || !!state.shareToken;
 
     if (renameBtn) renameBtn.classList.toggle("btn-disabled", readOnly || !single);
     if (viewBtn) viewBtn.classList.toggle("btn-disabled", !single);
@@ -296,29 +373,22 @@
     if (shareBtn) shareBtn.classList.toggle("btn-disabled", false);
   }
 
-  function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  }
+  // ---------- UPLOAD ----------
+  async function uploadOneFileToCurrentFolder(file) {
+    if (state.shareMode === "view" || state.shareToken) return;
 
-  async function uploadRealFile(file) {
-    const dataUrl = await fileToBase64(file);
-    state.items.push({
-      id: uid(),
-      type: "file",
-      name: file.name,
-      parentId: state.currentFolderId,
-      modified: nowStamp(),
-      by: state.user,
-      mime: file.type || "application/octet-stream",
-      dataUrl
+    if (state.currentFolderId === state.rootId) {
+      alert("Upload into a folder (create one first), not the root.");
+      return;
+    }
+
+    const form = new FormData();
+    form.append("file", file);
+
+    await apiFetch(`/upload?folder_id=${encodeURIComponent(state.currentFolderId)}`, {
+      method: "POST",
+      body: form,
     });
-    saveState();
-    render();
   }
 
   async function uploadFilesIntoCurrentFolder(fileList) {
@@ -326,42 +396,27 @@
     if (files.length === 0) return;
 
     for (const f of files) {
-      await uploadRealFile(f);
+      await uploadOneFileToCurrentFolder(f);
     }
+
+    await refreshCurrentFolder();
   }
 
-  function moveItemsIntoFolder(ids, folderId) {
-    const folder = findItem(folderId);
-    if (!folder || folder.type !== "folder") return;
+  // ---------- MOVE ----------
+  async function moveItemsIntoFolder(ids, folderId) {
+    if (state.shareMode === "view" || state.shareToken) return;
 
-    const moving = ids.map(findItem).filter(Boolean);
-
-    for (const item of moving) {
-      if (item.id === folderId) return;
-      if (item.type === "folder" && isDescendant(folderId, item.id)) return;
+    for (const id of ids) {
+      await apiFetch(`/items/${encodeURIComponent(id)}/move`, {
+        method: "POST",
+        json: { new_parent_id: Number(folderId) },
+      });
     }
 
-    for (const item of moving) {
-      item.parentId = folderId;
-      item.modified = nowStamp();
-      item.by = state.user;
-    }
-
-    state.selectedIds = [];
-    saveState();
-    render();
+    await refreshCurrentFolder();
   }
 
-  function isDescendant(candidateId, folderId) {
-    let cur = findItem(candidateId);
-    while (cur) {
-      if (cur.parentId === folderId) return true;
-      if (!cur.parentId || cur.parentId === state.rootId) return false;
-      cur = findItem(cur.parentId);
-    }
-    return false;
-  }
-
+  // ---------- REQUIRED SELECTION ----------
   function requireSingleSelection() {
     const sel = selectedItems();
     if (sel.length !== 1) {
@@ -371,37 +426,42 @@
     return sel[0];
   }
 
-  function createFolder() {
+  // ---------- CRUD ----------
+  async function createFolder() {
+    if (state.shareMode === "view" || state.shareToken) return;
+
     const name = prompt("Folder name:");
     if (!name) return;
-    state.items.push({
-      id: uid(),
-      type: "folder",
-      name: name.trim(),
-      parentId: state.currentFolderId,
-      modified: nowStamp(),
-      by: state.user
+
+    const parentId = state.currentFolderId === state.rootId ? null : Number(state.currentFolderId);
+
+    await apiFetch(`/folders`, {
+      method: "POST",
+      json: { name: name.trim(), parent_id: parentId },
     });
-    saveState();
-    render();
+
+    await refreshCurrentFolder();
   }
 
-  function renameSelected() {
-    if (state.shareMode === "view") return;
+  async function renameSelected() {
+    if (state.shareMode === "view" || state.shareToken) return;
 
     const sel = requireSingleSelection();
     if (!sel) return;
+
     const next = prompt("New name:", sel.name);
     if (!next) return;
-    sel.name = next.trim();
-    sel.modified = nowStamp();
-    sel.by = state.user;
-    saveState();
-    render();
+
+    await apiFetch(`/items/${encodeURIComponent(sel.id)}/rename`, {
+      method: "POST",
+      json: { new_name: next.trim() },
+    });
+
+    await refreshCurrentFolder();
   }
 
-  function deleteSelected() {
-    if (state.shareMode === "view") return;
+  async function deleteSelected() {
+    if (state.shareMode === "view" || state.shareToken) return;
 
     const sel = selectedItems();
     if (sel.length === 0) {
@@ -411,15 +471,18 @@
     const ok = confirm(`Delete ${sel.length} item(s)?`);
     if (!ok) return;
 
-    sel.forEach((item) => {
-      item.isDeleted = true;
-      item.modified = nowStamp();
-      item.by = state.user;
-    });
+    for (const item of sel) {
+      await apiFetch(`/items/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+    }
 
-    state.selectedIds = [];
-    saveState();
-    render();
+    await refreshCurrentFolder();
+  }
+
+  function fileDownloadUrl(item) {
+    if (state.shareToken) {
+      return `${API_BASE}/s/${encodeURIComponent(state.shareToken)}/download`;
+    }
+    return `${API_BASE}/download/${encodeURIComponent(item.id)}`;
   }
 
   function viewSelected() {
@@ -427,38 +490,48 @@
     if (!sel) return;
 
     if (sel.type === "folder") {
+      navStack.push(state.currentFolderId);
       state.currentFolderId = sel.id;
       state.selectedIds = [];
-      saveState();
-      render();
+      saveUiState();
+      refreshCurrentFolder().catch((e) => alert(e.message));
       return;
     }
 
-    if (sel.dataUrl) {
-      const safeName = escapeHtml(sel.name);
-      const mime = sel.mime || "application/octet-stream";
+    const safeName = escapeHtml(sel.name);
+    const mime = sel.mime || "application/octet-stream";
+    const url = fileDownloadUrl(sel);
 
-      if (mime.startsWith("image/")) {
-        openViewModal(safeName, `<img src="${sel.dataUrl}" alt="${safeName}" />`);
-        return;
-      }
-
-      if (mime === "application/pdf") {
-        openViewModal(safeName, `<iframe src="${sel.dataUrl}"></iframe>`);
-        return;
-      }
-
+    if (mime.startsWith("image/")) {
       openViewModal(
         safeName,
-        `<p style="font-size:22px;">No preview available.</p>
-         <a class="link" download="${safeName}" href="${sel.dataUrl}">Download</a>`
+        `<img src="${url}" alt="${safeName}" />
+         <div style="margin-top:14px;">
+           <a class="link" href="${url}" download="${safeName}">Download</a>
+         </div>`
       );
       return;
     }
 
-    alert(`No stored data for: ${sel.name}`);
+    if (mime === "application/pdf") {
+      openViewModal(
+        safeName,
+        `<iframe src="${url}"></iframe>
+         <div style="margin-top:14px;">
+           <a class="link" href="${url}" download="${safeName}">Download</a>
+         </div>`
+      );
+      return;
+    }
+
+    openViewModal(
+      safeName,
+      `<p style="font-size:22px;">No preview available.</p>
+       <a class="link" href="${url}" download="${safeName}">Download</a>`
+    );
   }
 
+  // ---------- SORT ----------
   function wireSorting() {
     const headCells = document.querySelectorAll(".sortable");
     headCells.forEach((cell) => {
@@ -470,12 +543,13 @@
           state.sortKey = key;
           state.sortDir = "asc";
         }
-        saveState();
+        saveUiState();
         render();
       });
     });
   }
 
+  // ---------- RENDER ----------
   function render() {
     buildBreadcrumb();
 
@@ -489,7 +563,9 @@
         const rowClass = isSelected(item.id) ? "row selected" : "row";
         const iconSrc = item.type === "folder" ? "icons/folder.svg" : "icons/file.svg";
         return `
-        <div class="${rowClass}" draggable="true" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
+        <div class="${rowClass}" draggable="true" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(
+          item.type
+        )}">
           <div class="col col-check"><span class="select-box"></span></div>
           <div class="col col-name"><img class="icon" src="${iconSrc}" alt="" />${escapeHtml(item.name)}</div>
           <div class="col col-mod">${escapeHtml(item.modified || "")}</div>
@@ -505,7 +581,7 @@
         const id = row.getAttribute("data-id");
         if (!id) return;
         toggleSelected(id);
-        saveState();
+        saveUiState();
         render();
       });
 
@@ -514,10 +590,11 @@
         const id = row.getAttribute("data-id");
         const item = findItem(id);
         if (item && item.type === "folder") {
+          navStack.push(state.currentFolderId);
           state.currentFolderId = item.id;
           state.selectedIds = [];
-          saveState();
-          render();
+          saveUiState();
+          refreshCurrentFolder().catch((e) => alert(e.message));
         }
       });
 
@@ -528,7 +605,7 @@
 
         if (!isSelected(id)) {
           state.selectedIds = [id];
-          saveState();
+          saveUiState();
           render();
         }
 
@@ -547,7 +624,7 @@
 
         if (!isSelected(id)) {
           state.selectedIds = [id];
-          saveState();
+          saveUiState();
           render();
         }
 
@@ -587,35 +664,28 @@
           return;
         }
         const ids = Array.isArray(payload.ids) ? payload.ids : [];
-        moveItemsIntoFolder(ids, targetId);
+        moveItemsIntoFolder(ids, targetId).catch((e) => alert(e.message));
       });
     });
 
     updateActionButtons();
-
-    const url = new URL(window.location.href);
-    const token = url.searchParams.get("share");
-    if (token) {
-      const rec = state.shares && state.shares[token];
-      if (rec) {
-        const item = findItem(rec.itemId);
-        if (item && item.type === "file" && state.selectedIds.length === 1 && state.selectedIds[0] === item.id) {
-          if (viewModal && viewModal.classList.contains("hidden")) viewSelected();
-        }
-      }
-    }
   }
 
+  // ---------- BUTTONS / EVENTS ----------
   function wireButtons() {
-    if (backToLoginBtn) backToLoginBtn.addEventListener("click", () => (window.location.href = "login.html"));
+    if (backToLoginBtn)
+      backToLoginBtn.addEventListener("click", () => {
+        sessionStorage.removeItem("edushare_user");
+        window.location.href = "login.html";
+      });
 
     if (backBtn)
       backBtn.addEventListener("click", () => {
         closeCtx();
         state.currentFolderId = parentFolderId();
         state.selectedIds = [];
-        saveState();
-        render();
+        saveUiState();
+        refreshCurrentFolder().catch((e) => alert(e.message));
       });
 
     if (selectAll)
@@ -624,7 +694,7 @@
         const visible = getVisibleItems().map((x) => x.id);
         if (selectAll.checked) state.selectedIds = Array.from(new Set(state.selectedIds.concat(visible)));
         else state.selectedIds = state.selectedIds.filter((id) => !visible.includes(id));
-        saveState();
+        saveUiState();
         render();
       });
 
@@ -635,7 +705,7 @@
 
     function openCreateModal() {
       closeCtx();
-      if (state.shareMode === "view") return;
+      if (state.shareMode === "view" || state.shareToken) return;
       if (createModal) createModal.classList.remove("hidden");
     }
 
@@ -648,14 +718,14 @@
     if (createFolderBtn)
       createFolderBtn.addEventListener("click", () => {
         closeCreateModal();
-        createFolder();
+        createFolder().catch((e) => alert(e.message));
       });
 
     if (createFileBtn)
       createFileBtn.addEventListener("click", () => {
         closeCreateModal();
         closeCtx();
-        if (state.shareMode === "view") return;
+        if (state.shareMode === "view" || state.shareToken) return;
         if (filePicker) filePicker.click();
       });
 
@@ -669,13 +739,13 @@
 
         try {
           await uploadFilesIntoCurrentFolder(files);
-        } catch {
-          alert("Upload failed.");
+        } catch (e) {
+          alert("Upload failed: " + e.message);
         }
       });
 
     tableBody.addEventListener("dragover", (e) => {
-      if (state.shareMode === "view") return;
+      if (state.shareMode === "view" || state.shareToken) return;
       if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes("Files")) return;
       e.preventDefault();
       tableBody.classList.add("drop-upload");
@@ -686,25 +756,28 @@
     });
 
     tableBody.addEventListener("drop", async (e) => {
-      if (state.shareMode === "view") return;
+      if (state.shareMode === "view" || state.shareToken) return;
       if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
       e.preventDefault();
       tableBody.classList.remove("drop-upload");
 
       try {
         await uploadFilesIntoCurrentFolder(e.dataTransfer.files);
-      } catch {
-        alert("Drop upload failed.");
+      } catch (err) {
+        alert("Drop upload failed: " + err.message);
       }
     });
 
-    if (renameBtn) renameBtn.addEventListener("click", renameSelected);
+    if (renameBtn) renameBtn.addEventListener("click", () => renameSelected().catch((e) => alert(e.message)));
     if (viewBtn) viewBtn.addEventListener("click", viewSelected);
-    if (deleteBtn) deleteBtn.addEventListener("click", deleteSelected);
+    if (deleteBtn) deleteBtn.addEventListener("click", () => deleteSelected().catch((e) => alert(e.message)));
     if (cloudBtn) cloudBtn.addEventListener("click", () => alert("Cloud clicked"));
 
     if (shareBtn) shareBtn.addEventListener("click", openShareModal);
-    if (createShareBtn) createShareBtn.addEventListener("click", createShareLinkForSelected);
+    if (createShareBtn)
+      createShareBtn.addEventListener("click", () =>
+        createShareLinkForSelected().catch((e) => alert("Share failed: " + e.message))
+      );
     if (copyShareBtn) copyShareBtn.addEventListener("click", copyShareLink);
     if (closeShareBtn) closeShareBtn.addEventListener("click", closeShareModal);
 
@@ -724,8 +797,8 @@
     window.addEventListener("resize", closeCtx);
 
     if (ctxView) ctxView.addEventListener("click", () => { closeCtx(); viewSelected(); });
-    if (ctxRename) ctxRename.addEventListener("click", () => { closeCtx(); renameSelected(); });
-    if (ctxDelete) ctxDelete.addEventListener("click", () => { closeCtx(); deleteSelected(); });
+    if (ctxRename) ctxRename.addEventListener("click", () => { closeCtx(); renameSelected().catch((e) => alert(e.message)); });
+    if (ctxDelete) ctxDelete.addEventListener("click", () => { closeCtx(); deleteSelected().catch((e) => alert(e.message)); });
   }
 
   if (searchInput)
@@ -734,9 +807,16 @@
       render();
     });
 
+  // ---------- INIT ----------
+  loadUiState();
   applyShareFromUrl();
+  refreshProfileName();
+
 
   wireButtons();
   wireSorting();
-  render();
+
+  refreshCurrentFolder().catch((e) => {
+    alert("Failed to load from API: " + e.message);
+  });
 })();
