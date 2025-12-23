@@ -1,15 +1,55 @@
 (function () {
-  // ---------- LOGIN PAGE ----------
-    const loginForm = document.getElementById("loginForm");
-    if (loginForm) {
-    loginForm.addEventListener("submit", function (e) {
-        e.preventDefault();
-        const email = document.getElementById("email")?.value?.trim() || "alice";
-        sessionStorage.setItem("edushare_user", email);
-        window.location.href = "portal.html";
-    });
-    return;
+// ---------- LOGIN PAGE ----------
+const loginForm = document.getElementById("loginForm");
+if (loginForm) {
+  // A) Show/Hide password toggle (put this BEFORE return;)
+  const passwordEl = document.getElementById("password");
+  const toggleBtn = document.getElementById("togglePassword");
+
+if (toggleBtn && passwordEl) {
+  toggleBtn.addEventListener("click", () => {
+    const isHidden = passwordEl.type === "password";
+    passwordEl.type = isHidden ? "text" : "password";
+
+    toggleBtn.innerHTML = isHidden
+      ? '<i class="bi bi-eye-slash"></i>'
+      : '<i class="bi bi-eye"></i>';
+
+    toggleBtn.setAttribute(
+      "aria-label",
+      isHidden ? "Hide password" : "Show password"
+    );
+  });
+}
+
+
+
+  // B) Validation (replace your submit handler with this)
+  loginForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+
+    const emailEl = document.getElementById("email");
+    const passEl = document.getElementById("password");
+
+    const email = emailEl?.value?.trim() || "";
+    const pass = passEl?.value || "";
+
+    if (!email) return alert("Please enter your email/username.");
+    if (!pass) return alert("Please enter your password.");
+
+    // Optional: basic email format if it contains '@'
+    if (email.includes("@") && !/^\S+@\S+\.\S+$/.test(email)) {
+      return alert("Please enter a valid email address.");
     }
+
+    // Still using stub auth for local dev
+    sessionStorage.setItem("edushare_user", email);
+    window.location.href = "portal.html";
+  });
+
+  return;
+}
+
 
 
   // ---------- PORTAL PAGE ----------

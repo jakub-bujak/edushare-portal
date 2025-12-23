@@ -535,3 +535,45 @@ body{
   font-size: 28px;
   font-weight: 600;
 }
+
+/* --- Password input + eye icon (no border, clean) --- */
+.password-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.password-wrap .input {
+  padding-right: 56px; /* space for eye icon */
+}
+
+.toggle-btn {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+
+  width: 32px;
+  height: 32px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: none;
+  background: transparent;
+
+  cursor: pointer;
+  padding: 0;
+}
+
+/* icon styling */
+.toggle-btn i {
+  font-size: 36px;
+  line-height: 1;
+  color: #242424;   /* 👈 requested color */
+}
+
+/* subtle hover feedback (optional but nice) */
+.toggle-btn:hover i {
+  opacity: 0.75;
+}
