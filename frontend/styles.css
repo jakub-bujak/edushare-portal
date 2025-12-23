@@ -220,6 +220,11 @@ body{
   margin-bottom:18px;
 }
 
+.searchbar .icon{
+  width:48px;
+  height:48px;
+}
+
 .search-input{
   width:100%;
   background:transparent;
@@ -242,6 +247,25 @@ body{
 .table-body{
   max-height:520px;
   overflow:auto;
+  scrollbar-width:thin;
+  scrollbar-color:var(--border) transparent;
+}
+
+.table-body::-webkit-scrollbar{
+  width:14px;
+}
+
+.table-body::-webkit-scrollbar-track{
+  background:transparent;
+}
+
+.table-body::-webkit-scrollbar-thumb{
+  background:transparent;
+  border:3px solid var(--border);
+}
+
+.table-body::-webkit-scrollbar-thumb:hover{
+  background:#2a2a2a;
 }
 
 .row{
@@ -310,6 +334,8 @@ body{
 
 .row.selected{
   background:#262626;
+  outline:2px solid var(--border);
+  outline-offset:-2px;
 }
 
 .modal{
@@ -424,4 +450,12 @@ body{
   margin-right:14px;
   object-fit:contain;
   vertical-align:middle;
+}
+
+.row{
+  cursor:pointer;
+}
+
+.row:hover{
+  background:#2a2a2a;
 }
