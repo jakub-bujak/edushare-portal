@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EduShare | Login</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-name">EduShare</div>
+    </div>
+  </header>
+
+  <main class="center">
+    <section class="card login-card" aria-label="Login">
+      <h1 class="card-title">Login</h1>
+
+      <form id="loginForm" class="form">
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input id="email" class="input" type="email" autocomplete="email" required />
+        </label>
+
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input id="password" class="input" type="password" autocomplete="current-password" required />
+        </label>
+
+        <button class="btn btn-primary" type="submit">Login</button>
+
+        <a class="link" href="#" onclick="return false;">Forgot password?</a>
+      </form>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
