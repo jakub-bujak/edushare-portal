@@ -25,6 +25,7 @@
 
       <div class="sidebar-group">
         <button id="uploadBtn" class="btn sidebar-btn btn-blue">Upload</button>
+        <button id="shareBtn" class="btn sidebar-btn">Share</button>
         <button id="renameBtn" class="btn sidebar-btn btn-orange">Rename</button>
         <button id="viewBtn" class="btn sidebar-btn btn-green">View</button>
         <button id="deleteBtn" class="btn sidebar-btn btn-red">Delete</button>
@@ -48,7 +49,7 @@
 
       <div class="table">
         <div class="table-head">
-        <div class="col col-check"></div>
+          <div class="col col-check"></div>
           <div class="col col-name sortable" data-sort="name">
             Name <span class="sort-caret">▼</span>
           </div>
@@ -70,11 +71,37 @@
       <h2 class="modal-title">Create</h2>
 
       <div class="modal-actions">
-        <button id="createFolderBtn" class="btn modal-btn">New Folder</button>
-        <button id="createFileBtn" class="btn modal-btn">New File</button>
+        <button id="createFolderBtn" class="btn modal-btn" type="button">New Folder</button>
+        <button id="createFileBtn" class="btn modal-btn" type="button">Upload File</button>
       </div>
 
-      <button id="cancelCreateBtn" class="btn modal-cancel">Cancel</button>
+      <button id="cancelCreateBtn" class="btn modal-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+
+  <div id="shareModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content" style="width:min(700px, 92vw);">
+      <h2 class="modal-title">Share</h2>
+
+      <div style="margin:12px 0; font-size:18px;">
+        Permission:
+        <label style="margin-left:10px;">
+          <input type="radio" name="sharePerm" value="view" checked> View
+        </label>
+        <label style="margin-left:10px;">
+          <input type="radio" name="sharePerm" value="edit"> Edit
+        </label>
+      </div>
+
+      <div style="display:flex; gap:10px; align-items:center; margin:12px 0;">
+        <input id="shareLink" class="search-input" type="text" readonly style="flex:1;" />
+        <button id="copyShareBtn" class="btn modal-btn" type="button">Copy</button>
+      </div>
+
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button id="createShareBtn" class="btn modal-btn" type="button">Create link</button>
+        <button id="closeShareBtn" class="btn modal-cancel" type="button">Close</button>
+      </div>
     </div>
   </div>
 
@@ -84,6 +111,15 @@
     <button id="ctxDelete" class="ctx-item" type="button">Delete</button>
   </div>
 
+  <input id="filePicker" type="file" class="hidden" multiple />
+
+  <div id="viewModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content" style="width:min(900px, 92vw);">
+      <h2 id="viewTitle" class="modal-title">View</h2>
+      <div id="viewBody" style="margin:16px 0;"></div>
+      <button id="closeViewBtn" class="btn modal-cancel" type="button">Close</button>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

@@ -488,3 +488,28 @@ body{
   outline:2px dashed var(--border);
   outline-offset:-2px;
 }
+
+#viewBody{
+  border:4px solid var(--border);
+  padding:14px;
+  background:#141414;
+  max-height:60vh;
+  overflow:auto;
+}
+
+#viewBody img{
+  max-width:100%;
+  height:auto;
+  display:block;
+}
+
+#viewBody iframe{
+  width:100%;
+  height:60vh;
+  border:0;
+}
+
+.table-body.drop-upload{
+  outline: 3px dashed var(--border);
+  outline-offset: -6px;
+}
