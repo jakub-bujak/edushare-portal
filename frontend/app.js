@@ -21,6 +21,11 @@
   const deleteBtn = document.getElementById("deleteBtn");
   const cloudBtn = document.getElementById("cloudBtn");
 
+  const ctxMenu = document.getElementById("ctxMenu");
+  const ctxView = document.getElementById("ctxView");
+  const ctxRename = document.getElementById("ctxRename");
+  const ctxDelete = document.getElementById("ctxDelete");
+
   if (!tableBody) return;
 
   function escapeHtml(str) {
@@ -150,13 +155,56 @@
     return state.selectedIds.map(findItem).filter(Boolean);
   }
 
-  function updateActionButtons(){
+  function updateActionButtons() {
     const sel = selectedItems();
     const single = sel.length === 1;
-
     if (renameBtn) renameBtn.classList.toggle("btn-disabled", !single);
     if (viewBtn) viewBtn.classList.toggle("btn-disabled", !single);
     if (deleteBtn) deleteBtn.classList.toggle("btn-disabled", sel.length === 0);
+  }
+
+  function openCtx(x, y) {
+    if (!ctxMenu) return;
+    ctxMenu.style.left = x + "px";
+    ctxMenu.style.top = y + "px";
+    ctxMenu.classList.remove("hidden");
+  }
+
+  function closeCtx() {
+    if (!ctxMenu) return;
+    ctxMenu.classList.add("hidden");
+  }
+
+  function moveItemsIntoFolder(ids, folderId) {
+    const folder = findItem(folderId);
+    if (!folder || folder.type !== "folder") return;
+
+    const moving = ids.map(findItem).filter(Boolean);
+
+    for (const item of moving) {
+      if (item.id === folderId) return;
+      if (item.type === "folder" && isDescendant(folderId, item.id)) return;
+    }
+
+    for (const item of moving) {
+      item.parentId = folderId;
+      item.modified = nowStamp();
+      item.by = state.user;
+    }
+
+    state.selectedIds = [];
+    saveState();
+    render();
+  }
+
+  function isDescendant(candidateId, folderId) {
+    let cur = findItem(candidateId);
+    while (cur) {
+      if (cur.parentId === folderId) return true;
+      if (!cur.parentId || cur.parentId === state.rootId) return false;
+      cur = findItem(cur.parentId);
+    }
+    return false;
   }
 
   function render() {
@@ -168,37 +216,30 @@
     if (selectAll) selectAll.checked = allChecked;
 
     tableBody.innerHTML = visible.map(item => {
-    const rowClass = isSelected(item.id) ? "row selected" : "row";
-    const iconSrc = item.type === "folder"
-        ? "icons/folder.svg"
-        : "icons/file.svg";
-
-    return `
-        <div class="${rowClass}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
-        <div class="col col-check">
-            <span class="select-box"></span>
+      const rowClass = isSelected(item.id) ? "row selected" : "row";
+      const iconSrc = item.type === "folder" ? "icons/folder.svg" : "icons/file.svg";
+      return `
+        <div class="${rowClass}" draggable="true" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
+          <div class="col col-check"><span class="select-box"></span></div>
+          <div class="col col-name"><img class="icon" src="${iconSrc}" alt="" />${escapeHtml(item.name)}</div>
+          <div class="col col-mod">${escapeHtml(item.modified || "")}</div>
+          <div class="col col-by">${escapeHtml(item.by || "")}</div>
         </div>
-        <div class="col col-name">
-            <img class="icon" src="${iconSrc}" alt="" />
-            ${escapeHtml(item.name)}
-        </div>
-        <div class="col col-mod">${escapeHtml(item.modified || "")}</div>
-        <div class="col col-by">${escapeHtml(item.by || "")}</div>
-        </div>
-    `;
+      `;
     }).join("");
 
     Array.from(tableBody.querySelectorAll(".row")).forEach(row => {
       row.addEventListener("click", () => {
+        closeCtx();
         const id = row.getAttribute("data-id");
         if (!id) return;
-
         toggleSelected(id);
         saveState();
         render();
       });
 
       row.addEventListener("dblclick", () => {
+        closeCtx();
         const id = row.getAttribute("data-id");
         const item = findItem(id);
         if (item && item.type === "folder") {
@@ -208,11 +249,73 @@
           render();
         }
       });
+
+      row.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const id = row.getAttribute("data-id");
+        if (!id) return;
+
+        if (!isSelected(id)) {
+          state.selectedIds = [id];
+          saveState();
+          render();
+        }
+
+        const menuWidth = 200;
+        const menuHeight = 140;
+        const px = Math.min(e.clientX, window.innerWidth - menuWidth);
+        const py = Math.min(e.clientY, window.innerHeight - menuHeight);
+        openCtx(px, py);
+      });
+
+      row.addEventListener("dragstart", (e) => {
+        const id = row.getAttribute("data-id");
+        if (!id) return;
+
+        if (!isSelected(id)) {
+          state.selectedIds = [id];
+          saveState();
+          render();
+        }
+
+        e.dataTransfer.setData("text/plain", JSON.stringify({ ids: state.selectedIds }));
+        e.dataTransfer.effectAllowed = "move";
+      });
+
+      row.addEventListener("dragover", (e) => {
+        const type = row.getAttribute("data-type");
+        if (type !== "folder") return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        row.classList.add("drop-target");
+      });
+
+      row.addEventListener("dragleave", () => {
+        row.classList.remove("drop-target");
+      });
+
+      row.addEventListener("drop", (e) => {
+        const type = row.getAttribute("data-type");
+        if (type !== "folder") return;
+        e.preventDefault();
+        row.classList.remove("drop-target");
+
+        const targetId = row.getAttribute("data-id");
+        if (!targetId) return;
+
+        let payload;
+        try {
+          payload = JSON.parse(e.dataTransfer.getData("text/plain"));
+        } catch {
+          return;
+        }
+        const ids = Array.isArray(payload.ids) ? payload.ids : [];
+        moveItemsIntoFolder(ids, targetId);
+      });
     });
 
     updateActionButtons();
   }
-
 
   function requireSingleSelection() {
     const sel = selectedItems();
@@ -226,7 +329,6 @@
   function createFolder() {
     const name = prompt("Folder name:");
     if (!name) return;
-
     state.items.push({
       id: uid(),
       type: "folder",
@@ -242,7 +344,6 @@
   function createFileMock() {
     const name = prompt("File name (e.g. notes.pdf):");
     if (!name) return;
-
     state.items.push({
       id: uid(),
       type: "file",
@@ -258,10 +359,8 @@
   function renameSelected() {
     const sel = requireSingleSelection();
     if (!sel) return;
-
     const next = prompt("New name:", sel.name);
     if (!next) return;
-
     sel.name = next.trim();
     sel.modified = nowStamp();
     sel.by = state.user;
@@ -321,11 +420,10 @@
   }
 
   function wireButtons() {
-    if (backToLoginBtn) backToLoginBtn.addEventListener("click", () => {
-      window.location.href = "login.html";
-    });
+    if (backToLoginBtn) backToLoginBtn.addEventListener("click", () => window.location.href = "login.html");
 
     if (backBtn) backBtn.addEventListener("click", () => {
+      closeCtx();
       state.currentFolderId = parentFolderId();
       state.selectedIds = [];
       saveState();
@@ -333,6 +431,7 @@
     });
 
     if (selectAll) selectAll.addEventListener("change", () => {
+      closeCtx();
       const visible = getVisibleItems().map(x => x.id);
       if (selectAll.checked) state.selectedIds = Array.from(new Set(state.selectedIds.concat(visible)));
       else state.selectedIds = state.selectedIds.filter(id => !visible.includes(id));
@@ -345,35 +444,35 @@
     const createFileBtn = document.getElementById("createFileBtn");
     const cancelCreateBtn = document.getElementById("cancelCreateBtn");
 
-    function openCreateModal(){
+    function openCreateModal() {
+      closeCtx();
       if (createModal) createModal.classList.remove("hidden");
     }
 
-    function closeCreateModal(){
+    function closeCreateModal() {
       if (createModal) createModal.classList.add("hidden");
     }
 
     if (uploadBtn) uploadBtn.addEventListener("click", openCreateModal);
-
-    if (createFolderBtn) createFolderBtn.addEventListener("click", () => {
-      closeCreateModal();
-      createFolder();
-    });
-
-    if (createFileBtn) createFileBtn.addEventListener("click", () => {
-      closeCreateModal();
-      createFileMock();
-    });
-
+    if (createFolderBtn) createFolderBtn.addEventListener("click", () => { closeCreateModal(); createFolder(); });
+    if (createFileBtn) createFileBtn.addEventListener("click", () => { closeCreateModal(); createFileMock(); });
     if (cancelCreateBtn) cancelCreateBtn.addEventListener("click", closeCreateModal);
 
     if (renameBtn) renameBtn.addEventListener("click", renameSelected);
     if (viewBtn) viewBtn.addEventListener("click", viewSelected);
     if (deleteBtn) deleteBtn.addEventListener("click", deleteSelected);
     if (cloudBtn) cloudBtn.addEventListener("click", () => alert("Cloud clicked"));
+
+    document.addEventListener("click", closeCtx);
+    document.addEventListener("scroll", closeCtx, true);
+    window.addEventListener("resize", closeCtx);
+
+    if (ctxView) ctxView.addEventListener("click", () => { closeCtx(); viewSelected(); });
+    if (ctxRename) ctxRename.addEventListener("click", () => { closeCtx(); renameSelected(); });
+    if (ctxDelete) ctxDelete.addEventListener("click", () => { closeCtx(); deleteSelected(); });
   }
 
-  if (searchInput) searchInput.addEventListener("input", render);
+  if (searchInput) searchInput.addEventListener("input", () => { closeCtx(); render(); });
 
   wireButtons();
   wireSorting();
