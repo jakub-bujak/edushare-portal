@@ -168,21 +168,24 @@
     if (selectAll) selectAll.checked = allChecked;
 
     tableBody.innerHTML = visible.map(item => {
-      const rowClass = isSelected(item.id) ? "row selected" : "row";
-      const iconClass = item.type === "folder" ? "icon-folder" : "icon-file";
-      return `
+    const rowClass = isSelected(item.id) ? "row selected" : "row";
+    const iconSrc = item.type === "folder"
+        ? "icons/folder.svg"
+        : "icons/file.svg";
+
+    return `
         <div class="${rowClass}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
-          <div class="col col-check">
+        <div class="col col-check">
             <span class="select-box"></span>
-          </div>
-          <div class="col col-name">
-            <span class="${iconClass}"></span>
-            ${escapeHtml(item.name)}
-          </div>
-          <div class="col col-mod">${escapeHtml(item.modified || "")}</div>
-          <div class="col col-by">${escapeHtml(item.by || "")}</div>
         </div>
-      `;
+        <div class="col col-name">
+            <img class="icon" src="${iconSrc}" alt="" />
+            ${escapeHtml(item.name)}
+        </div>
+        <div class="col col-mod">${escapeHtml(item.modified || "")}</div>
+        <div class="col col-by">${escapeHtml(item.by || "")}</div>
+        </div>
+    `;
     }).join("");
 
     Array.from(tableBody.querySelectorAll(".row")).forEach(row => {
