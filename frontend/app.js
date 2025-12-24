@@ -282,6 +282,10 @@
     const token = url.searchParams.get("share");
     if (!token) return;
     state.shareToken = token;
+
+    // ✅ ensure UI is consistent immediately
+    saveUiState();
+    updateBackButton();
   }
 
   async function loadShareMeta() {
@@ -314,6 +318,7 @@
         );
         state.items = kids.map(mapItemFromApi);
         render();
+        updateBackButton(); // ✅
         return;
       }
 
@@ -321,6 +326,7 @@
       if (state.shareRootItem?.type === "file") {
         state.items = [mapItemFromApi(state.shareRootItem)];
         render();
+        updateBackButton(); // ✅
         return;
       }
     }
@@ -335,7 +341,9 @@
     }
 
     render();
+    updateBackButton(); // ✅
   }
+
 
   // ---------------- BREADCRUMB ----------------
   function buildBreadcrumb() {
@@ -441,6 +449,21 @@
     ctxMenu.classList.add("hidden");
   }
 
+
+    // ---------------- UI HELPERS ----------------
+  function updateBackButton() {
+    if (!backBtn) return;
+
+    const inSharedMode = !!state.shareToken;
+
+    backBtn.disabled = inSharedMode;
+    backBtn.classList.toggle("btn-disabled", inSharedMode);
+
+    // Optional label clarity
+    backBtn.textContent = inSharedMode ? "Back (disabled)" : "Back";
+  }
+
+
   // ---------------- SHARE MODAL ----------------
   function getSharePerm() {
     const el = document.querySelector('input[name="sharePerm"]:checked');
@@ -478,15 +501,20 @@
   }
 
   async function copyShareLink() {
-    if (!shareLink || !shareLink.value) return;
+    if (!shareLink || !shareLink.value.trim()) {
+      alert("Create a share link first.");
+      return;
+    }
+
     try {
-      await navigator.clipboard.writeText(shareLink.value);
+      await navigator.clipboard.writeText(shareLink.value.trim());
     } catch {
       shareLink.focus();
       shareLink.select();
       document.execCommand("copy");
     }
   }
+
 
   // ---------------- PERMISSIONS / BUTTONS ----------------
   function updateActionButtons() {
@@ -501,6 +529,8 @@
 
     if (uploadBtn) uploadBtn.classList.toggle("btn-disabled", shareReadOnly);
     if (shareBtn) shareBtn.classList.toggle("btn-disabled", false);
+
+    updateBackButton(); // ✅ add this
   }
 
   function requireSingleSelection() {
@@ -810,6 +840,7 @@
 
     if (backBtn)
       backBtn.addEventListener("click", () => {
+        if (state.shareToken) return; // ✅ shared mode: do nothing
         closeCtx();
         state.currentFolderId = parentFolderId();
         state.selectedIds = [];
@@ -928,6 +959,7 @@
   // ---------------- INIT ----------------
   loadUiState();
   applyShareFromUrl();
+  updateBackButton();
 
   (async () => {
     try {

@@ -594,3 +594,121 @@ body{
   object-fit: contain;
   display: block;
 }
+
+/* ---- Share modal polish ---- */
+.share-modal {
+  width: min(720px, 92vw);
+  text-align: left;
+  padding: 28px 28px;
+}
+
+.share-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.share-x {
+  border: 3px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  width: 44px;
+  height: 44px;
+  font-size: 26px;
+  cursor: pointer;
+  line-height: 1;
+}
+.share-x:hover { background: #242424; }
+
+.share-row {
+  margin: 18px 0;
+}
+
+.share-label {
+  font-size: 20px;
+  opacity: 0.85;
+  margin-bottom: 10px;
+}
+
+.share-pills {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 3px solid var(--border);
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pill input {
+  width: 18px;
+  height: 18px;
+}
+
+.pill span {
+  font-size: 22px;
+}
+
+.share-link-wrap {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.share-link-input {
+  flex: 1;
+  background: transparent;
+  color: var(--text);
+  border: 4px solid var(--border);
+  outline: none;
+  padding: 12px 14px;
+  font-size: 20px;          /* ✅ fixes the “giant URL” look */
+  min-height: 52px;
+}
+
+.share-link-input:focus {
+  border-color: #ffffff;
+}
+
+.share-btn {
+  font-size: 22px;
+  padding: 12px 16px;
+  white-space: nowrap;
+}
+
+.share-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.share-primary {
+  font-size: 22px;
+  padding: 12px 18px;
+  background: #0d4f7a;
+  border: 4px solid var(--border);
+}
+
+.share-primary:hover {
+  filter: brightness(1.1);
+}
+
+.share-hint {
+  margin-top: 10px;
+  font-size: 18px;
+  opacity: 0.75;
+}
+
+/* Optional: disabled back button looks correct */
+.back-btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}

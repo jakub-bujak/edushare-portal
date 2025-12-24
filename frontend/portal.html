@@ -83,30 +83,42 @@
   </div>
 
   <div id="shareModal" class="modal hidden" role="dialog" aria-modal="true">
-    <div class="modal-content" style="width:min(700px, 92vw);">
-      <h2 class="modal-title">Share</h2>
+    <div class="modal-content share-modal">
+        <div class="share-header">
+        <h2 class="modal-title" style="margin:0;">Share</h2>
+        <button id="closeShareBtn" class="share-x" type="button" aria-label="Close">✕</button>
+        </div>
 
-      <div style="margin:12px 0; font-size:18px;">
-        Permission:
-        <label style="margin-left:10px;">
-          <input type="radio" name="sharePerm" value="view" checked> View
-        </label>
-        <label style="margin-left:10px;">
-          <input type="radio" name="sharePerm" value="edit"> Edit
-        </label>
-      </div>
+        <div class="share-row">
+        <div class="share-label">Permission</div>
+        <div class="share-pills">
+            <label class="pill">
+            <input type="radio" name="sharePerm" value="view" checked />
+            <span>View</span>
+            </label>
+            <label class="pill">
+            <input type="radio" name="sharePerm" value="edit" />
+            <span>Edit</span>
+            </label>
+        </div>
+        </div>
 
-      <div style="display:flex; gap:10px; align-items:center; margin:12px 0;">
-        <input id="shareLink" class="search-input" type="text" readonly style="flex:1;" />
-        <button id="copyShareBtn" class="btn modal-btn" type="button">Copy</button>
-      </div>
+        <div class="share-row">
+        <div class="share-label">Link</div>
+        <div class="share-link-wrap">
+            <input id="shareLink" class="share-link-input" type="text" readonly placeholder="Create a link to show it here…" />
+            <button id="copyShareBtn" class="btn share-btn" type="button">Copy</button>
+        </div>
+        <div class="share-hint">Anyone with the link can access based on the permission above.</div>
+        </div>
 
-      <div style="display:flex; gap:10px; justify-content:flex-end;">
-        <button id="createShareBtn" class="btn modal-btn" type="button">Create link</button>
-        <button id="closeShareBtn" class="btn modal-cancel" type="button">Close</button>
-      </div>
+        <div class="share-actions">
+        <button id="createShareBtn" class="btn share-primary" type="button">Create link</button>
+        <!-- close button moved to X in the header -->
+        </div>
     </div>
-  </div>
+    </div>
+
 
   <div id="ctxMenu" class="ctx hidden">
     <button id="ctxView" class="ctx-item" type="button">View</button>
