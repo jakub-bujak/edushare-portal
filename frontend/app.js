@@ -1,56 +1,47 @@
 (function () {
-// ---------- LOGIN PAGE ----------
-const loginForm = document.getElementById("loginForm");
-if (loginForm) {
-  // A) Show/Hide password toggle (put this BEFORE return;)
-  const passwordEl = document.getElementById("password");
-  const toggleBtn = document.getElementById("togglePassword");
+  // ---------- LOGIN PAGE ----------
+  const loginForm = document.getElementById("loginForm");
+  if (loginForm) {
+    // A) Show/Hide password toggle
+    const passwordEl = document.getElementById("password");
+    const toggleBtn = document.getElementById("togglePassword");
 
-if (toggleBtn && passwordEl) {
-  toggleBtn.addEventListener("click", () => {
-    const isHidden = passwordEl.type === "password";
-    passwordEl.type = isHidden ? "text" : "password";
+    if (toggleBtn && passwordEl) {
+      toggleBtn.addEventListener("click", () => {
+        const isHidden = passwordEl.type === "password";
+        passwordEl.type = isHidden ? "text" : "password";
 
-    toggleBtn.innerHTML = isHidden
-      ? '<i class="bi bi-eye-slash"></i>'
-      : '<i class="bi bi-eye"></i>';
+        toggleBtn.innerHTML = isHidden
+          ? '<i class="bi bi-eye-slash"></i>'
+          : '<i class="bi bi-eye"></i>';
 
-    toggleBtn.setAttribute(
-      "aria-label",
-      isHidden ? "Hide password" : "Show password"
-    );
-  });
-}
-
-
-
-  // B) Validation (replace your submit handler with this)
-  loginForm.addEventListener("submit", function (e) {
-    e.preventDefault();
-
-    const emailEl = document.getElementById("email");
-    const passEl = document.getElementById("password");
-
-    const email = emailEl?.value?.trim() || "";
-    const pass = passEl?.value || "";
-
-    if (!email) return alert("Please enter your email/username.");
-    if (!pass) return alert("Please enter your password.");
-
-    // Optional: basic email format if it contains '@'
-    if (email.includes("@") && !/^\S+@\S+\.\S+$/.test(email)) {
-      return alert("Please enter a valid email address.");
+        toggleBtn.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+      });
     }
 
-    // Still using stub auth for local dev
-    sessionStorage.setItem("edushare_user", email);
-    window.location.href = "portal.html";
-  });
+    // B) Validation
+    loginForm.addEventListener("submit", function (e) {
+      e.preventDefault();
 
-  return;
-}
+      const emailEl = document.getElementById("email");
+      const passEl = document.getElementById("password");
 
+      const email = emailEl?.value?.trim() || "";
+      const pass = passEl?.value || "";
 
+      if (!email) return alert("Please enter your email/username.");
+      if (!pass) return alert("Please enter your password.");
+
+      if (email.includes("@") && !/^\S+@\S+\.\S+$/.test(email)) {
+        return alert("Please enter a valid email address.");
+      }
+
+      sessionStorage.setItem("edushare_user", email);
+      window.location.href = "portal.html";
+    });
+
+    return;
+  }
 
   // ---------- PORTAL PAGE ----------
   const tableBody = document.getElementById("tableBody");
@@ -91,7 +82,6 @@ if (toggleBtn && passwordEl) {
   // ---------- API HELPERS ----------
   const API_BASE = "http://127.0.0.1:8000";
 
-
   function getUser() {
     return sessionStorage.getItem("edushare_user") || "alice";
   }
@@ -122,24 +112,53 @@ if (toggleBtn && passwordEl) {
     return res.text();
   }
 
+  // Blob fetch helper (authenticated)
+  async function apiFetchBlob(path, opts = {}) {
+    const headers = new Headers(opts.headers || {});
+    headers.set("X-User", getUser());
+
+    const res = await fetch(API_BASE + path, { ...opts, headers });
+
+    if (!res.ok) {
+      let msg = `${res.status} ${res.statusText}`;
+      try {
+        const data = await res.json();
+        msg = data.detail || JSON.stringify(data);
+      } catch {}
+      throw new Error(msg);
+    }
+
+    const blob = await res.blob();
+    const ct = res.headers.get("content-type") || "";
+    return { blob, contentType: ct };
+  }
+
+  // Blob fetch helper (guest/share links - NO headers)
+  async function guestFetchBlob(url) {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`${res.status} ${res.statusText}`);
+    }
+    const blob = await res.blob();
+    const ct = res.headers.get("content-type") || "";
+    return { blob, contentType: ct };
+  }
+
   async function refreshProfileName() {
-  if (!profileNameEl) return;
+    if (!profileNameEl) return;
 
-  // If viewing via share link, show "Guest"
-  if (state.shareToken) {
-    profileNameEl.textContent = "Guest";
-    return;
+    if (state.shareToken) {
+      profileNameEl.textContent = "Guest";
+      return;
+    }
+
+    try {
+      const me = await apiFetch("/me");
+      profileNameEl.textContent = me.display_name || state.user || "Unknown";
+    } catch {
+      profileNameEl.textContent = state.user || "Unknown";
+    }
   }
-
-  try {
-    const me = await apiFetch("/me"); // uses X-User header already
-    profileNameEl.textContent = me.display_name || state.user || "Unknown";
-  } catch {
-    // If /me fails (e.g., backend down), fall back
-    profileNameEl.textContent = state.user || "Unknown";
-  }
-}
-
 
   // ---------- UI HELPERS ----------
   function escapeHtml(str) {
@@ -151,6 +170,35 @@ if (toggleBtn && passwordEl) {
       .replaceAll("'", "&#039;");
   }
 
+  let activeBlobUrl = null; // for cleanup on close
+
+  function openViewModal(title, html) {
+    if (!viewModal || !viewTitle || !viewBody) return;
+    viewTitle.textContent = title || "View";
+    viewBody.innerHTML = html || "";
+    viewModal.classList.remove("hidden");
+  }
+
+  function closeViewModal() {
+    if (activeBlobUrl) {
+      try {
+        URL.revokeObjectURL(activeBlobUrl);
+      } catch {}
+      activeBlobUrl = null;
+    }
+    if (!viewModal) return;
+    viewModal.classList.add("hidden");
+    if (viewBody) viewBody.innerHTML = "";
+  }
+
+  function openNoPreviewModal(title, downloadHtml) {
+    openViewModal(
+      title,
+      `<p style="font-size:22px;">File not available for preview.</p>
+       ${downloadHtml || ""}`
+    );
+  }
+
   // ---------- STATE (SERVER BACKED) ----------
   const state = {
     user: getUser(),
@@ -159,9 +207,9 @@ if (toggleBtn && passwordEl) {
     selectedIds: [],
     sortKey: "name",
     sortDir: "asc",
-    shareMode: null,   // UI-only: "view" | "edit" | null
-    shareToken: null,  // token from URL when in share mode
-    items: [],         // current folder listing from API
+    shareMode: null, // UI-only: "view" | "edit" | null
+    shareToken: null, // token from URL when in share mode
+    items: [], // current folder listing from API
   };
 
   function saveUiState() {
@@ -196,8 +244,8 @@ if (toggleBtn && passwordEl) {
       type: x.type,
       name: x.name,
       parentId: x.parent_id == null ? "root" : String(x.parent_id),
-      modified: "", // if your ItemOut has timestamps, map them here
-      by: "",       // could be owner display name later
+      modified: "",
+      by: "",
       mime: x.mime_type || "application/octet-stream",
       sizeBytes: x.size_bytes || 0,
     };
@@ -215,7 +263,6 @@ if (toggleBtn && passwordEl) {
   }
 
   // For root/back button we keep a simple client-side stack.
-  // (We don’t have a server endpoint to ask for a folder’s parent yet.)
   const navStack = [];
 
   function parentFolderId() {
@@ -228,7 +275,6 @@ if (toggleBtn && passwordEl) {
     await refreshProfileName();
     state.selectedIds = [];
 
-    // Share link mode: list folder via token
     if (state.shareToken) {
       const kids = await apiFetch(`/s/${encodeURIComponent(state.shareToken)}/children`);
       state.items = kids.map(mapItemFromApi);
@@ -236,7 +282,6 @@ if (toggleBtn && passwordEl) {
       return;
     }
 
-    // Normal mode
     if (state.currentFolderId === state.rootId) {
       const rootItems = await apiFetch(`/root`);
       state.items = rootItems.map(mapItemFromApi);
@@ -252,8 +297,6 @@ if (toggleBtn && passwordEl) {
   function buildBreadcrumb() {
     if (!breadcrumbEl) return;
 
-    // Minimal breadcrumb (root + current folder name).
-    // Full chain would require an API to get parents.
     const parts = [{ id: state.rootId, name: "Public Folder" }];
     const cur = currentFolderItem();
     if (cur) parts.push({ id: cur.id, name: cur.name });
@@ -272,7 +315,6 @@ if (toggleBtn && passwordEl) {
         const id = a.getAttribute("data-id");
         if (!id) return;
 
-        // reset navigation stack when clicking root
         if (id === state.rootId) navStack.length = 0;
 
         state.currentFolderId = id;
@@ -286,8 +328,6 @@ if (toggleBtn && passwordEl) {
   // ---------- LIST / FILTER / SORT ----------
   function getVisibleItems() {
     const q = (searchInput ? searchInput.value : "").trim().toLowerCase();
-
-    // state.items already represents current folder listing (server side)
     const filtered = q ? state.items.filter((x) => x.name.toLowerCase().includes(q)) : state.items;
 
     return filtered.slice().sort((a, b) => {
@@ -325,20 +365,6 @@ if (toggleBtn && passwordEl) {
     ctxMenu.classList.add("hidden");
   }
 
-  // ---------- VIEW MODAL ----------
-  function openViewModal(title, html) {
-    if (!viewModal || !viewTitle || !viewBody) return;
-    viewTitle.textContent = title || "View";
-    viewBody.innerHTML = html || "";
-    viewModal.classList.remove("hidden");
-  }
-
-  function closeViewModal() {
-    if (!viewModal) return;
-    viewModal.classList.add("hidden");
-    if (viewBody) viewBody.innerHTML = "";
-  }
-
   // ---------- SHARE MODAL ----------
   function getSharePerm() {
     const el = document.querySelector('input[name="sharePerm"]:checked');
@@ -361,7 +387,7 @@ if (toggleBtn && passwordEl) {
     const sel = requireSingleSelection();
     if (!sel) return;
 
-    const perm = getSharePerm(); // "view" | "edit"
+    const perm = getSharePerm();
     const role = perm === "edit" ? "editor" : "viewer";
 
     const data = await apiFetch(`/share-links/${encodeURIComponent(sel.id)}`, {
@@ -392,7 +418,7 @@ if (toggleBtn && passwordEl) {
     if (!token) return;
 
     state.shareToken = token;
-    state.shareMode = "view"; // UI-only; server enforces permissions anyway
+    state.shareMode = "view";
     state.currentFolderId = state.rootId;
     navStack.length = 0;
     saveUiState();
@@ -525,7 +551,50 @@ if (toggleBtn && passwordEl) {
     return `${API_BASE}/download/${encodeURIComponent(item.id)}`;
   }
 
-  function viewSelected() {
+  // Download helper (works in normal mode too)
+  async function downloadItem(item) {
+    if (state.shareToken) {
+      window.open(fileDownloadUrl(item), "_blank");
+      return;
+    }
+
+    const { blob } = await apiFetchBlob(`/download/${encodeURIComponent(item.id)}`);
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = item.name || "download";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---------- PREVIEW ----------
+  function isOfficeDoc(nameLower, mimeLower) {
+    // Word
+    const isWord =
+      /\.(doc|docx)$/.test(nameLower) ||
+      mimeLower.includes("msword") ||
+      mimeLower.includes("officedocument.wordprocessingml");
+
+    // Excel
+    const isExcel =
+      /\.(xls|xlsx|xlsm|xlsb|csv)$/.test(nameLower) ||
+      mimeLower.includes("ms-excel") ||
+      mimeLower.includes("officedocument.spreadsheetml");
+
+    // PowerPoint
+    const isPpt =
+      /\.(ppt|pptx|pptm)$/.test(nameLower) ||
+      mimeLower.includes("ms-powerpoint") ||
+      mimeLower.includes("officedocument.presentationml");
+
+    return isWord || isExcel || isPpt;
+  }
+
+  async function viewSelected() {
     const sel = requireSingleSelection();
     if (!sel) return;
 
@@ -539,36 +608,186 @@ if (toggleBtn && passwordEl) {
     }
 
     const safeName = escapeHtml(sel.name);
-    const mime = sel.mime || "application/octet-stream";
-    const url = fileDownloadUrl(sel);
+    const mime = (sel.mime || "").toLowerCase();
+    const nameLower = (sel.name || "").toLowerCase();
 
-    if (mime.startsWith("image/")) {
-      openViewModal(
-        safeName,
-        `<img src="${url}" alt="${safeName}" />
-         <div style="margin-top:14px;">
-           <a class="link" href="${url}" download="${safeName}">Download</a>
-         </div>`
-      );
+    const isPdf = mime === "application/pdf" || nameLower.endsWith(".pdf");
+    const isImage = mime.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp)$/.test(nameLower);
+    const isVideo = mime.startsWith("video/") || /\.(mp4|webm|ogg)$/.test(nameLower);
+    const isText = mime.startsWith("text/") || nameLower.endsWith(".txt");
+
+    const isOffice = isOfficeDoc(nameLower, mime);
+
+    // ========== GUEST MODE ==========
+    if (state.shareToken) {
+      const url = fileDownloadUrl(sel);
+
+      if (isOffice) {
+        openNoPreviewModal(safeName, `<a class="link" href="${url}" download="${safeName}">Download</a>`);
+        return;
+      }
+
+      try {
+        const { blob, contentType } = await guestFetchBlob(url);
+        const ctLower = (contentType || "").toLowerCase();
+
+        const isPdfCt = ctLower.includes("pdf");
+        const isTextCt = ctLower.startsWith("text/") || ctLower.includes("json") || ctLower.includes("xml");
+
+        if (isText || isTextCt) {
+          const text = await blob.text();
+          openViewModal(
+            safeName,
+            `<pre style="
+              max-height:60vh;
+              overflow:auto;
+              text-align:left;
+              white-space:pre-wrap;
+              background:#111;
+              padding:16px;
+              border-radius:6px;
+            ">${escapeHtml(text)}</pre>
+            <div style="margin-top:14px;">
+              <a class="link" href="${url}" download="${safeName}">Download</a>
+            </div>`
+          );
+          return;
+        }
+
+        const blobUrl = URL.createObjectURL(blob);
+        activeBlobUrl = blobUrl;
+
+        if (isImage) {
+          openViewModal(
+            safeName,
+            `<img src="${blobUrl}" alt="${safeName}" />
+             <div style="margin-top:14px;">
+               <a class="link" href="${url}" download="${safeName}">Download</a>
+             </div>`
+          );
+          return;
+        }
+
+        if (isPdf || isPdfCt) {
+          openViewModal(
+            safeName,
+            `<iframe src="${blobUrl}"></iframe>
+             <div style="margin-top:14px;">
+               <a class="link" href="${url}" download="${safeName}">Download</a>
+             </div>`
+          );
+          return;
+        }
+
+        if (isVideo) {
+          openViewModal(
+            safeName,
+            `<video controls style="width:100%; height:100%;" src="${blobUrl}"></video>
+             <div style="margin-top:14px;">
+               <a class="link" href="${url}" download="${safeName}">Download</a>
+             </div>`
+          );
+          return;
+        }
+
+        openNoPreviewModal(safeName, `<a class="link" href="${url}" download="${safeName}">Download</a>`);
+        return;
+      } catch {
+        openNoPreviewModal(safeName, `<a class="link" href="${url}" download="${safeName}">Download</a>`);
+        return;
+      }
+    }
+
+    // ========== AUTH MODE ==========
+    if (isOffice) {
+      openNoPreviewModal(safeName, `<a class="link" href="#" id="dlLink">Download</a>`);
+      const dl = document.getElementById("dlLink");
+      if (dl) {
+        dl.addEventListener("click", (e) => {
+          e.preventDefault();
+          downloadItem(sel).catch((err) => alert("Download failed: " + err.message));
+        });
+      }
       return;
     }
 
-    if (mime === "application/pdf") {
-      openViewModal(
-        safeName,
-        `<iframe src="${url}"></iframe>
-         <div style="margin-top:14px;">
-           <a class="link" href="${url}" download="${safeName}">Download</a>
-         </div>`
-      );
-      return;
-    }
+    try {
+      const { blob, contentType } = await apiFetchBlob(`/download/${encodeURIComponent(sel.id)}`);
+      const ctLower = (contentType || "").toLowerCase();
 
-    openViewModal(
-      safeName,
-      `<p style="font-size:22px;">No preview available.</p>
-       <a class="link" href="${url}" download="${safeName}">Download</a>`
-    );
+      const isPdfCt = ctLower.includes("pdf");
+      const isTextCt = ctLower.startsWith("text/") || ctLower.includes("json") || ctLower.includes("xml");
+
+      if (isText || isTextCt) {
+        const text = await blob.text();
+
+        openViewModal(
+          safeName,
+          `<pre style="
+            max-height:60vh;
+            overflow:auto;
+            text-align:left;
+            white-space:pre-wrap;
+            background:#111;
+            padding:16px;
+            border-radius:6px;
+          ">${escapeHtml(text)}</pre>
+          <div style="margin-top:14px;">
+            <a class="link" href="#" id="dlLink">Download</a>
+          </div>`
+        );
+
+        const dl = document.getElementById("dlLink");
+        if (dl) {
+          dl.addEventListener("click", (e) => {
+            e.preventDefault();
+            downloadItem(sel).catch((err) => alert("Download failed: " + err.message));
+          });
+        }
+        return;
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
+      activeBlobUrl = blobUrl;
+
+      if (isImage) {
+        openViewModal(
+          safeName,
+          `<img src="${blobUrl}" alt="${safeName}" />
+           <div style="margin-top:14px;">
+             <a class="link" href="#" id="dlLink">Download</a>
+           </div>`
+        );
+      } else if (isPdf || isPdfCt) {
+        openViewModal(
+          safeName,
+          `<iframe src="${blobUrl}"></iframe>
+           <div style="margin-top:14px;">
+             <a class="link" href="#" id="dlLink">Download</a>
+           </div>`
+        );
+      } else if (isVideo) {
+        openViewModal(
+          safeName,
+          `<video controls style="width:100%; height:100%;" src="${blobUrl}"></video>
+           <div style="margin-top:14px;">
+             <a class="link" href="#" id="dlLink">Download</a>
+           </div>`
+        );
+      } else {
+        openNoPreviewModal(safeName, `<a class="link" href="#" id="dlLink">Download</a>`);
+      }
+
+      const dl = document.getElementById("dlLink");
+      if (dl) {
+        dl.addEventListener("click", (e) => {
+          e.preventDefault();
+          downloadItem(sel).catch((err) => alert("Download failed: " + err.message));
+        });
+      }
+    } catch (e) {
+      alert("Preview failed: " + e.message);
+    }
   }
 
   // ---------- SORT ----------
@@ -655,57 +874,6 @@ if (toggleBtn && passwordEl) {
         const py = Math.min(e.clientY, window.innerHeight - menuHeight);
         openCtx(px, py);
       });
-
-      row.addEventListener("dragstart", (e) => {
-        if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) return;
-
-        const id = row.getAttribute("data-id");
-        if (!id) return;
-
-        if (!isSelected(id)) {
-          state.selectedIds = [id];
-          saveUiState();
-          render();
-        }
-
-        e.dataTransfer.setData("text/plain", JSON.stringify({ ids: state.selectedIds }));
-        e.dataTransfer.effectAllowed = "move";
-      });
-
-      row.addEventListener("dragover", (e) => {
-        if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) return;
-
-        const type = row.getAttribute("data-type");
-        if (type !== "folder") return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        row.classList.add("drop-target");
-      });
-
-      row.addEventListener("dragleave", () => {
-        row.classList.remove("drop-target");
-      });
-
-      row.addEventListener("drop", (e) => {
-        if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) return;
-
-        const type = row.getAttribute("data-type");
-        if (type !== "folder") return;
-        e.preventDefault();
-        row.classList.remove("drop-target");
-
-        const targetId = row.getAttribute("data-id");
-        if (!targetId) return;
-
-        let payload;
-        try {
-          payload = JSON.parse(e.dataTransfer.getData("text/plain"));
-        } catch {
-          return;
-        }
-        const ids = Array.isArray(payload.ids) ? payload.ids : [];
-        moveItemsIntoFolder(ids, targetId).catch((e) => alert(e.message));
-      });
     });
 
     updateActionButtons();
@@ -784,32 +952,8 @@ if (toggleBtn && passwordEl) {
         }
       });
 
-    tableBody.addEventListener("dragover", (e) => {
-      if (state.shareMode === "view" || state.shareToken) return;
-      if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes("Files")) return;
-      e.preventDefault();
-      tableBody.classList.add("drop-upload");
-    });
-
-    tableBody.addEventListener("dragleave", () => {
-      tableBody.classList.remove("drop-upload");
-    });
-
-    tableBody.addEventListener("drop", async (e) => {
-      if (state.shareMode === "view" || state.shareToken) return;
-      if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
-      e.preventDefault();
-      tableBody.classList.remove("drop-upload");
-
-      try {
-        await uploadFilesIntoCurrentFolder(e.dataTransfer.files);
-      } catch (err) {
-        alert("Drop upload failed: " + err.message);
-      }
-    });
-
     if (renameBtn) renameBtn.addEventListener("click", () => renameSelected().catch((e) => alert(e.message)));
-    if (viewBtn) viewBtn.addEventListener("click", viewSelected);
+    if (viewBtn) viewBtn.addEventListener("click", () => viewSelected().catch((e) => alert(e.message)));
     if (deleteBtn) deleteBtn.addEventListener("click", () => deleteSelected().catch((e) => alert(e.message)));
     if (cloudBtn) cloudBtn.addEventListener("click", () => alert("Cloud clicked"));
 
@@ -836,9 +980,21 @@ if (toggleBtn && passwordEl) {
     document.addEventListener("scroll", closeCtx, true);
     window.addEventListener("resize", closeCtx);
 
-    if (ctxView) ctxView.addEventListener("click", () => { closeCtx(); viewSelected(); });
-    if (ctxRename) ctxRename.addEventListener("click", () => { closeCtx(); renameSelected().catch((e) => alert(e.message)); });
-    if (ctxDelete) ctxDelete.addEventListener("click", () => { closeCtx(); deleteSelected().catch((e) => alert(e.message)); });
+    if (ctxView)
+      ctxView.addEventListener("click", () => {
+        closeCtx();
+        viewSelected().catch((e) => alert(e.message));
+      });
+    if (ctxRename)
+      ctxRename.addEventListener("click", () => {
+        closeCtx();
+        renameSelected().catch((e) => alert(e.message));
+      });
+    if (ctxDelete)
+      ctxDelete.addEventListener("click", () => {
+        closeCtx();
+        deleteSelected().catch((e) => alert(e.message));
+      });
   }
 
   if (searchInput)
@@ -851,7 +1007,6 @@ if (toggleBtn && passwordEl) {
   loadUiState();
   applyShareFromUrl();
   refreshProfileName();
-
 
   wireButtons();
   wireSorting();

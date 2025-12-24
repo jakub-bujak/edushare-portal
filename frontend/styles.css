@@ -577,3 +577,20 @@ body{
 .toggle-btn:hover i {
   opacity: 0.75;
 }
+
+/* Center content inside preview modal */
+#viewBody {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+/* Image preview sizing */
+#viewBody img {
+  max-width: 90%;
+  max-height: 60vh;
+  object-fit: contain;
+  display: block;
+}
