@@ -1,25 +1,27 @@
 (function () {
-  // ---------- LOGIN PAGE ----------
+  const API_BASE = "http://127.0.0.1:8000";
+
+  // ---------------- LOGIN PAGE ----------------
   const loginForm = document.getElementById("loginForm");
   if (loginForm) {
-    // A) Show/Hide password toggle
     const passwordEl = document.getElementById("password");
     const toggleBtn = document.getElementById("togglePassword");
+
+    // If user got redirected here from a share link, we'll have ?next=...
+    const url = new URL(window.location.href);
+    const nextUrl = url.searchParams.get("next"); // encoded full url back to portal
 
     if (toggleBtn && passwordEl) {
       toggleBtn.addEventListener("click", () => {
         const isHidden = passwordEl.type === "password";
         passwordEl.type = isHidden ? "text" : "password";
-
         toggleBtn.innerHTML = isHidden
           ? '<i class="bi bi-eye-slash"></i>'
           : '<i class="bi bi-eye"></i>';
-
         toggleBtn.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
       });
     }
 
-    // B) Validation
     loginForm.addEventListener("submit", function (e) {
       e.preventDefault();
 
@@ -37,13 +39,19 @@
       }
 
       sessionStorage.setItem("edushare_user", email);
-      window.location.href = "portal.html";
+
+      // Return to where they were going (share link), otherwise portal
+      if (nextUrl) {
+        window.location.href = decodeURIComponent(nextUrl);
+      } else {
+        window.location.href = "portal.html";
+      }
     });
 
     return;
   }
 
-  // ---------- PORTAL PAGE ----------
+  // ---------------- PORTAL PAGE ----------------
   const tableBody = document.getElementById("tableBody");
   const searchInput = document.getElementById("searchInput");
   const breadcrumbEl = document.getElementById("breadcrumb");
@@ -57,7 +65,6 @@
   const renameBtn = document.getElementById("renameBtn");
   const viewBtn = document.getElementById("viewBtn");
   const deleteBtn = document.getElementById("deleteBtn");
-  const cloudBtn = document.getElementById("cloudBtn");
 
   const ctxMenu = document.getElementById("ctxMenu");
   const ctxView = document.getElementById("ctxView");
@@ -79,16 +86,30 @@
 
   if (!tableBody) return;
 
-  // ---------- API HELPERS ----------
-  const API_BASE = "http://127.0.0.1:8000";
-
   function getUser() {
-    return sessionStorage.getItem("edushare_user") || "alice";
+    return sessionStorage.getItem("edushare_user") || "";
   }
 
+  function requireLoggedInIfShare() {
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get("share");
+    if (!token) return;
+
+    if (!getUser()) {
+      // force login, then return here
+      const next = encodeURIComponent(url.toString());
+      window.location.href = `login.html?next=${next}`;
+    }
+  }
+
+  requireLoggedInIfShare();
+
   async function apiFetch(path, opts = {}) {
+    const u = getUser();
+    if (!u) throw new Error("Not logged in");
+
     const headers = new Headers(opts.headers || {});
-    headers.set("X-User", getUser());
+    headers.set("X-User", u);
 
     if (opts.json) {
       headers.set("Content-Type", "application/json");
@@ -112,10 +133,12 @@
     return res.text();
   }
 
-  // Blob fetch helper (authenticated)
   async function apiFetchBlob(path, opts = {}) {
+    const u = getUser();
+    if (!u) throw new Error("Not logged in");
+
     const headers = new Headers(opts.headers || {});
-    headers.set("X-User", getUser());
+    headers.set("X-User", u);
 
     const res = await fetch(API_BASE + path, { ...opts, headers });
 
@@ -133,34 +156,16 @@
     return { blob, contentType: ct };
   }
 
-  // Blob fetch helper (guest/share links - NO headers)
-  async function guestFetchBlob(url) {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`${res.status} ${res.statusText}`);
-    }
-    const blob = await res.blob();
-    const ct = res.headers.get("content-type") || "";
-    return { blob, contentType: ct };
-  }
-
   async function refreshProfileName() {
     if (!profileNameEl) return;
-
-    if (state.shareToken) {
-      profileNameEl.textContent = "Guest";
-      return;
-    }
-
     try {
       const me = await apiFetch("/me");
-      profileNameEl.textContent = me.display_name || state.user || "Unknown";
+      profileNameEl.textContent = me.display_name || getUser() || "Unknown";
     } catch {
-      profileNameEl.textContent = state.user || "Unknown";
+      profileNameEl.textContent = getUser() || "Unknown";
     }
   }
 
-  // ---------- UI HELPERS ----------
   function escapeHtml(str) {
     return String(str)
       .replaceAll("&", "&amp;")
@@ -170,8 +175,20 @@
       .replaceAll("'", "&#039;");
   }
 
-  let activeBlobUrl = null; // for cleanup on close
+  function formatModifiedAt(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
 
+  let activeBlobUrl = null;
   function openViewModal(title, html) {
     if (!viewModal || !viewTitle || !viewBody) return;
     viewTitle.textContent = title || "View";
@@ -199,7 +216,7 @@
     );
   }
 
-  // ---------- STATE (SERVER BACKED) ----------
+  // ---------------- STATE ----------------
   const state = {
     user: getUser(),
     rootId: "root",
@@ -207,9 +224,10 @@
     selectedIds: [],
     sortKey: "name",
     sortDir: "asc",
-    shareMode: null, // UI-only: "view" | "edit" | null
-    shareToken: null, // token from URL when in share mode
-    items: [], // current folder listing from API
+    shareToken: null,
+    shareRole: null, // "viewer" | "editor"
+    shareRootItem: null, // ItemOut
+    items: [],
   };
 
   function saveUiState() {
@@ -219,7 +237,6 @@
         currentFolderId: state.currentFolderId,
         sortKey: state.sortKey,
         sortDir: state.sortDir,
-        shareMode: state.shareMode,
         shareToken: state.shareToken,
       })
     );
@@ -233,7 +250,6 @@
       if (s.currentFolderId) state.currentFolderId = s.currentFolderId;
       if (s.sortKey) state.sortKey = s.sortKey;
       if (s.sortDir) state.sortDir = s.sortDir;
-      if (s.shareMode) state.shareMode = s.shareMode;
       if (s.shareToken) state.shareToken = s.shareToken;
     } catch {}
   }
@@ -244,8 +260,8 @@
       type: x.type,
       name: x.name,
       parentId: x.parent_id == null ? "root" : String(x.parent_id),
-      modified: "",
-      by: "",
+      modified: formatModifiedAt(x.modified_at),
+      by: x.modified_by || "",
       mime: x.mime_type || "application/octet-stream",
       sizeBytes: x.size_bytes || 0,
     };
@@ -255,19 +271,34 @@
     return state.items.find((x) => x.id === id) || null;
   }
 
-  function currentFolderItem() {
-    if (state.currentFolderId === state.rootId) return null;
-    const item = findItem(state.currentFolderId);
-    if (!item || item.type !== "folder") return null;
-    return item;
-  }
-
-  // For root/back button we keep a simple client-side stack.
   const navStack = [];
-
   function parentFolderId() {
     if (navStack.length === 0) return state.rootId;
     return navStack[navStack.length - 1] || state.rootId;
+  }
+
+  function applyShareFromUrl() {
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get("share");
+    if (!token) return;
+    state.shareToken = token;
+  }
+
+  async function loadShareMeta() {
+    if (!state.shareToken) return;
+    const meta = await apiFetch(`/s/${encodeURIComponent(state.shareToken)}/meta`);
+    state.shareRole = meta.role;
+    state.shareRootItem = meta.root;
+
+    // if share link is for a folder, start there
+    if (meta.root.type === "folder") {
+      state.currentFolderId = String(meta.root.id);
+      navStack.length = 0;
+    } else {
+      // file share link: keep "root", but we'll preview/download using meta.root.id
+      state.currentFolderId = "root";
+      navStack.length = 0;
+    }
   }
 
   async function refreshCurrentFolder() {
@@ -276,12 +307,25 @@
     state.selectedIds = [];
 
     if (state.shareToken) {
-      const kids = await apiFetch(`/s/${encodeURIComponent(state.shareToken)}/children`);
-      state.items = kids.map(mapItemFromApi);
-      render();
-      return;
+      // If share link is to a folder:
+      if (state.shareRootItem?.type === "folder") {
+        const kids = await apiFetch(
+          `/s/${encodeURIComponent(state.shareToken)}/children?folder_id=${encodeURIComponent(state.currentFolderId)}`
+        );
+        state.items = kids.map(mapItemFromApi);
+        render();
+        return;
+      }
+
+      // If share link is to a file: show a single "virtual" file row
+      if (state.shareRootItem?.type === "file") {
+        state.items = [mapItemFromApi(state.shareRootItem)];
+        render();
+        return;
+      }
     }
 
+    // normal mode
     if (state.currentFolderId === state.rootId) {
       const rootItems = await apiFetch(`/root`);
       state.items = rootItems.map(mapItemFromApi);
@@ -293,13 +337,48 @@
     render();
   }
 
-  // ---------- BREADCRUMB ----------
+  // ---------------- BREADCRUMB ----------------
   function buildBreadcrumb() {
     if (!breadcrumbEl) return;
 
+    if (state.shareToken && state.shareRootItem) {
+      // share breadcrumb: Shared Item > (subfolder if navigating)
+      const parts = [{ id: String(state.shareRootItem.id), name: state.shareRootItem.name }];
+
+      // Only show current folder if different from root folder
+      if (state.shareRootItem.type === "folder" && state.currentFolderId !== String(state.shareRootItem.id)) {
+        const cur = findItem(state.currentFolderId);
+        if (cur && cur.type === "folder") parts.push({ id: cur.id, name: cur.name });
+      }
+
+      breadcrumbEl.innerHTML = parts
+        .map((p, idx) => {
+          const isLast = idx === parts.length - 1;
+          if (isLast) return escapeHtml(p.name);
+          return `<a class="crumb" href="#" data-id="${escapeHtml(p.id)}">${escapeHtml(p.name)}</a> &gt; `;
+        })
+        .join("");
+
+      Array.from(breadcrumbEl.querySelectorAll(".crumb")).forEach((a) => {
+        a.addEventListener("click", async (e) => {
+          e.preventDefault();
+          const id = a.getAttribute("data-id");
+          if (!id) return;
+          navStack.length = 0;
+          state.currentFolderId = id;
+          state.selectedIds = [];
+          saveUiState();
+          await refreshCurrentFolder().catch((err) => alert(err.message));
+        });
+      });
+
+      return;
+    }
+
+    // normal breadcrumb
     const parts = [{ id: state.rootId, name: "Public Folder" }];
-    const cur = currentFolderItem();
-    if (cur) parts.push({ id: cur.id, name: cur.name });
+    const cur = findItem(state.currentFolderId);
+    if (cur && cur.type === "folder") parts.push({ id: cur.id, name: cur.name });
 
     breadcrumbEl.innerHTML = parts
       .map((p, idx) => {
@@ -314,9 +393,7 @@
         e.preventDefault();
         const id = a.getAttribute("data-id");
         if (!id) return;
-
         if (id === state.rootId) navStack.length = 0;
-
         state.currentFolderId = id;
         state.selectedIds = [];
         saveUiState();
@@ -325,7 +402,7 @@
     });
   }
 
-  // ---------- LIST / FILTER / SORT ----------
+  // ---------------- LIST / SORT ----------------
   function getVisibleItems() {
     const q = (searchInput ? searchInput.value : "").trim().toLowerCase();
     const filtered = q ? state.items.filter((x) => x.name.toLowerCase().includes(q)) : state.items;
@@ -352,7 +429,6 @@
     return state.selectedIds.map(findItem).filter(Boolean);
   }
 
-  // ---------- CONTEXT MENU ----------
   function openCtx(x, y) {
     if (!ctxMenu) return;
     ctxMenu.style.left = x + "px";
@@ -365,7 +441,7 @@
     ctxMenu.classList.add("hidden");
   }
 
-  // ---------- SHARE MODAL ----------
+  // ---------------- SHARE MODAL ----------------
   function getSharePerm() {
     const el = document.querySelector('input[name="sharePerm"]:checked');
     return el && el.value ? el.value : "view";
@@ -412,77 +488,21 @@
     }
   }
 
-  function applyShareFromUrl() {
-    const url = new URL(window.location.href);
-    const token = url.searchParams.get("share");
-    if (!token) return;
-
-    state.shareToken = token;
-    state.shareMode = "view";
-    state.currentFolderId = state.rootId;
-    navStack.length = 0;
-    saveUiState();
-  }
-
-  // ---------- ACTION BUTTONS ----------
+  // ---------------- PERMISSIONS / BUTTONS ----------------
   function updateActionButtons() {
     const sel = selectedItems();
     const single = sel.length === 1;
 
-    const readOnly = state.shareMode === "view" || !!state.shareToken;
+    const shareReadOnly = state.shareToken && state.shareRole !== "editor";
 
-    if (renameBtn) renameBtn.classList.toggle("btn-disabled", readOnly || !single);
+    if (renameBtn) renameBtn.classList.toggle("btn-disabled", shareReadOnly || !single);
     if (viewBtn) viewBtn.classList.toggle("btn-disabled", !single);
-    if (deleteBtn) deleteBtn.classList.toggle("btn-disabled", readOnly || sel.length === 0);
+    if (deleteBtn) deleteBtn.classList.toggle("btn-disabled", shareReadOnly || sel.length === 0);
 
-    if (uploadBtn) uploadBtn.classList.toggle("btn-disabled", readOnly);
+    if (uploadBtn) uploadBtn.classList.toggle("btn-disabled", shareReadOnly);
     if (shareBtn) shareBtn.classList.toggle("btn-disabled", false);
   }
 
-  // ---------- UPLOAD ----------
-  async function uploadOneFileToCurrentFolder(file) {
-    if (state.shareMode === "view" || state.shareToken) return;
-
-    if (state.currentFolderId === state.rootId) {
-      alert("Upload into a folder (create one first), not the root.");
-      return;
-    }
-
-    const form = new FormData();
-    form.append("file", file);
-
-    await apiFetch(`/upload?folder_id=${encodeURIComponent(state.currentFolderId)}`, {
-      method: "POST",
-      body: form,
-    });
-  }
-
-  async function uploadFilesIntoCurrentFolder(fileList) {
-    const files = Array.from(fileList || []);
-    if (files.length === 0) return;
-
-    for (const f of files) {
-      await uploadOneFileToCurrentFolder(f);
-    }
-
-    await refreshCurrentFolder();
-  }
-
-  // ---------- MOVE ----------
-  async function moveItemsIntoFolder(ids, folderId) {
-    if (state.shareMode === "view" || state.shareToken) return;
-
-    for (const id of ids) {
-      await apiFetch(`/items/${encodeURIComponent(id)}/move`, {
-        method: "POST",
-        json: { new_parent_id: Number(folderId) },
-      });
-    }
-
-    await refreshCurrentFolder();
-  }
-
-  // ---------- REQUIRED SELECTION ----------
   function requireSingleSelection() {
     const sel = selectedItems();
     if (sel.length !== 1) {
@@ -492,73 +512,103 @@
     return sel[0];
   }
 
-  // ---------- CRUD ----------
-  async function createFolder() {
-    if (state.shareMode === "view" || state.shareToken) return;
-
-    const name = prompt("Folder name:");
-    if (!name) return;
-
-    const parentId = state.currentFolderId === state.rootId ? null : Number(state.currentFolderId);
-
-    await apiFetch(`/folders`, {
-      method: "POST",
-      json: { name: name.trim(), parent_id: parentId },
-    });
-
-    await refreshCurrentFolder();
-  }
-
+  // ---------------- CRUD (normal + share editor mode) ----------------
   async function renameSelected() {
-    if (state.shareMode === "view" || state.shareToken) return;
-
     const sel = requireSingleSelection();
     if (!sel) return;
 
     const next = prompt("New name:", sel.name);
     if (!next) return;
 
-    await apiFetch(`/items/${encodeURIComponent(sel.id)}/rename`, {
-      method: "POST",
-      json: { new_name: next.trim() },
-    });
+    if (state.shareToken) {
+      await apiFetch(`/s/${encodeURIComponent(state.shareToken)}/items/${encodeURIComponent(sel.id)}/rename`, {
+        method: "POST",
+        json: { new_name: next.trim() },
+      });
+    } else {
+      await apiFetch(`/items/${encodeURIComponent(sel.id)}/rename`, {
+        method: "POST",
+        json: { new_name: next.trim() },
+      });
+    }
 
     await refreshCurrentFolder();
   }
 
   async function deleteSelected() {
-    if (state.shareMode === "view" || state.shareToken) return;
-
     const sel = selectedItems();
-    if (sel.length === 0) {
-      alert("Select at least one item.");
-      return;
-    }
+    if (sel.length === 0) return alert("Select at least one item.");
+
     const ok = confirm(`Delete ${sel.length} item(s)?`);
     if (!ok) return;
 
     for (const item of sel) {
-      await apiFetch(`/items/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      if (state.shareToken) {
+        await apiFetch(`/s/${encodeURIComponent(state.shareToken)}/items/${encodeURIComponent(item.id)}`, {
+          method: "DELETE",
+        });
+      } else {
+        await apiFetch(`/items/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      }
     }
 
     await refreshCurrentFolder();
   }
 
-  function fileDownloadUrl(item) {
-    if (state.shareToken) {
-      return `${API_BASE}/s/${encodeURIComponent(state.shareToken)}/download`;
+  async function uploadFilesIntoCurrentFolder(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+
+    for (const f of files) {
+      const form = new FormData();
+      form.append("file", f);
+
+      if (state.shareToken) {
+        // share upload endpoint
+        await apiFetch(`/s/${encodeURIComponent(state.shareToken)}/upload?folder_id=${encodeURIComponent(state.currentFolderId)}`, {
+          method: "POST",
+          body: form,
+        });
+      } else {
+        await apiFetch(`/upload?folder_id=${encodeURIComponent(state.currentFolderId)}`, {
+          method: "POST",
+          body: form,
+        });
+      }
     }
-    return `${API_BASE}/download/${encodeURIComponent(item.id)}`;
+
+    await refreshCurrentFolder();
   }
 
-  // Download helper (works in normal mode too)
-  async function downloadItem(item) {
-    if (state.shareToken) {
-      window.open(fileDownloadUrl(item), "_blank");
-      return;
-    }
+  // ---------------- DOWNLOAD / PREVIEW ----------------
+  function isOfficeDoc(nameLower, mimeLower) {
+    const isWord =
+      /\.(doc|docx)$/.test(nameLower) ||
+      mimeLower.includes("msword") ||
+      mimeLower.includes("officedocument.wordprocessingml");
 
-    const { blob } = await apiFetchBlob(`/download/${encodeURIComponent(item.id)}`);
+    const isExcel =
+      /\.(xls|xlsx|xlsm|xlsb|csv)$/.test(nameLower) ||
+      mimeLower.includes("ms-excel") ||
+      mimeLower.includes("officedocument.spreadsheetml");
+
+    const isPpt =
+      /\.(ppt|pptx|pptm)$/.test(nameLower) ||
+      mimeLower.includes("ms-powerpoint") ||
+      mimeLower.includes("officedocument.presentationml");
+
+    return isWord || isExcel || isPpt;
+  }
+
+  function downloadPathForItem(item) {
+    if (state.shareToken) {
+      return `/s/${encodeURIComponent(state.shareToken)}/download/${encodeURIComponent(item.id)}`;
+    }
+    return `/download/${encodeURIComponent(item.id)}`;
+  }
+
+  async function downloadItem(item) {
+    const { blob } = await apiFetchBlob(downloadPathForItem(item));
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement("a");
@@ -569,29 +619,6 @@
     a.remove();
 
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  // ---------- PREVIEW ----------
-  function isOfficeDoc(nameLower, mimeLower) {
-    // Word
-    const isWord =
-      /\.(doc|docx)$/.test(nameLower) ||
-      mimeLower.includes("msword") ||
-      mimeLower.includes("officedocument.wordprocessingml");
-
-    // Excel
-    const isExcel =
-      /\.(xls|xlsx|xlsm|xlsb|csv)$/.test(nameLower) ||
-      mimeLower.includes("ms-excel") ||
-      mimeLower.includes("officedocument.spreadsheetml");
-
-    // PowerPoint
-    const isPpt =
-      /\.(ppt|pptx|pptm)$/.test(nameLower) ||
-      mimeLower.includes("ms-powerpoint") ||
-      mimeLower.includes("officedocument.presentationml");
-
-    return isWord || isExcel || isPpt;
   }
 
   async function viewSelected() {
@@ -618,89 +645,9 @@
 
     const isOffice = isOfficeDoc(nameLower, mime);
 
-    // ========== GUEST MODE ==========
-    if (state.shareToken) {
-      const url = fileDownloadUrl(sel);
+    const dlHtml = `<a class="link" href="#" id="dlLink">Download</a>`;
 
-      if (isOffice) {
-        openNoPreviewModal(safeName, `<a class="link" href="${url}" download="${safeName}">Download</a>`);
-        return;
-      }
-
-      try {
-        const { blob, contentType } = await guestFetchBlob(url);
-        const ctLower = (contentType || "").toLowerCase();
-
-        const isPdfCt = ctLower.includes("pdf");
-        const isTextCt = ctLower.startsWith("text/") || ctLower.includes("json") || ctLower.includes("xml");
-
-        if (isText || isTextCt) {
-          const text = await blob.text();
-          openViewModal(
-            safeName,
-            `<pre style="
-              max-height:60vh;
-              overflow:auto;
-              text-align:left;
-              white-space:pre-wrap;
-              background:#111;
-              padding:16px;
-              border-radius:6px;
-            ">${escapeHtml(text)}</pre>
-            <div style="margin-top:14px;">
-              <a class="link" href="${url}" download="${safeName}">Download</a>
-            </div>`
-          );
-          return;
-        }
-
-        const blobUrl = URL.createObjectURL(blob);
-        activeBlobUrl = blobUrl;
-
-        if (isImage) {
-          openViewModal(
-            safeName,
-            `<img src="${blobUrl}" alt="${safeName}" />
-             <div style="margin-top:14px;">
-               <a class="link" href="${url}" download="${safeName}">Download</a>
-             </div>`
-          );
-          return;
-        }
-
-        if (isPdf || isPdfCt) {
-          openViewModal(
-            safeName,
-            `<iframe src="${blobUrl}"></iframe>
-             <div style="margin-top:14px;">
-               <a class="link" href="${url}" download="${safeName}">Download</a>
-             </div>`
-          );
-          return;
-        }
-
-        if (isVideo) {
-          openViewModal(
-            safeName,
-            `<video controls style="width:100%; height:100%;" src="${blobUrl}"></video>
-             <div style="margin-top:14px;">
-               <a class="link" href="${url}" download="${safeName}">Download</a>
-             </div>`
-          );
-          return;
-        }
-
-        openNoPreviewModal(safeName, `<a class="link" href="${url}" download="${safeName}">Download</a>`);
-        return;
-      } catch {
-        openNoPreviewModal(safeName, `<a class="link" href="${url}" download="${safeName}">Download</a>`);
-        return;
-      }
-    }
-
-    // ========== AUTH MODE ==========
-    if (isOffice) {
-      openNoPreviewModal(safeName, `<a class="link" href="#" id="dlLink">Download</a>`);
+    function wireDlLink() {
       const dl = document.getElementById("dlLink");
       if (dl) {
         dl.addEventListener("click", (e) => {
@@ -708,11 +655,16 @@
           downloadItem(sel).catch((err) => alert("Download failed: " + err.message));
         });
       }
+    }
+
+    if (isOffice) {
+      openNoPreviewModal(safeName, dlHtml);
+      wireDlLink();
       return;
     }
 
     try {
-      const { blob, contentType } = await apiFetchBlob(`/download/${encodeURIComponent(sel.id)}`);
+      const { blob, contentType } = await apiFetchBlob(downloadPathForItem(sel));
       const ctLower = (contentType || "").toLowerCase();
 
       const isPdfCt = ctLower.includes("pdf");
@@ -720,30 +672,15 @@
 
       if (isText || isTextCt) {
         const text = await blob.text();
-
         openViewModal(
           safeName,
           `<pre style="
-            max-height:60vh;
-            overflow:auto;
-            text-align:left;
-            white-space:pre-wrap;
-            background:#111;
-            padding:16px;
-            border-radius:6px;
+            max-height:60vh; overflow:auto; text-align:left; white-space:pre-wrap;
+            background:#111; padding:16px; border-radius:6px;
           ">${escapeHtml(text)}</pre>
-          <div style="margin-top:14px;">
-            <a class="link" href="#" id="dlLink">Download</a>
-          </div>`
+          <div style="margin-top:14px;">${dlHtml}</div>`
         );
-
-        const dl = document.getElementById("dlLink");
-        if (dl) {
-          dl.addEventListener("click", (e) => {
-            e.preventDefault();
-            downloadItem(sel).catch((err) => alert("Download failed: " + err.message));
-          });
-        }
+        wireDlLink();
         return;
       }
 
@@ -754,61 +691,31 @@
         openViewModal(
           safeName,
           `<img src="${blobUrl}" alt="${safeName}" />
-           <div style="margin-top:14px;">
-             <a class="link" href="#" id="dlLink">Download</a>
-           </div>`
+           <div style="margin-top:14px;">${dlHtml}</div>`
         );
       } else if (isPdf || isPdfCt) {
         openViewModal(
           safeName,
           `<iframe src="${blobUrl}"></iframe>
-           <div style="margin-top:14px;">
-             <a class="link" href="#" id="dlLink">Download</a>
-           </div>`
+           <div style="margin-top:14px;">${dlHtml}</div>`
         );
       } else if (isVideo) {
         openViewModal(
           safeName,
           `<video controls style="width:100%; height:100%;" src="${blobUrl}"></video>
-           <div style="margin-top:14px;">
-             <a class="link" href="#" id="dlLink">Download</a>
-           </div>`
+           <div style="margin-top:14px;">${dlHtml}</div>`
         );
       } else {
-        openNoPreviewModal(safeName, `<a class="link" href="#" id="dlLink">Download</a>`);
+        openNoPreviewModal(safeName, dlHtml);
       }
 
-      const dl = document.getElementById("dlLink");
-      if (dl) {
-        dl.addEventListener("click", (e) => {
-          e.preventDefault();
-          downloadItem(sel).catch((err) => alert("Download failed: " + err.message));
-        });
-      }
+      wireDlLink();
     } catch (e) {
       alert("Preview failed: " + e.message);
     }
   }
 
-  // ---------- SORT ----------
-  function wireSorting() {
-    const headCells = document.querySelectorAll(".sortable");
-    headCells.forEach((cell) => {
-      cell.addEventListener("click", () => {
-        const key = cell.getAttribute("data-sort");
-        if (!key) return;
-        if (state.sortKey === key) state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
-        else {
-          state.sortKey = key;
-          state.sortDir = "asc";
-        }
-        saveUiState();
-        render();
-      });
-    });
-  }
-
-  // ---------- RENDER ----------
+  // ---------------- RENDER ----------------
   function render() {
     buildBreadcrumb();
 
@@ -822,15 +729,12 @@
         const rowClass = isSelected(item.id) ? "row selected" : "row";
         const iconSrc = item.type === "folder" ? "icons/folder.svg" : "icons/file.svg";
         return `
-        <div class="${rowClass}" draggable="true" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(
-          item.type
-        )}">
+        <div class="${rowClass}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
           <div class="col col-check"><span class="select-box"></span></div>
           <div class="col col-name"><img class="icon" src="${iconSrc}" alt="" />${escapeHtml(item.name)}</div>
           <div class="col col-mod">${escapeHtml(item.modified || "")}</div>
           <div class="col col-by">${escapeHtml(item.by || "")}</div>
-        </div>
-      `;
+        </div>`;
       })
       .join("");
 
@@ -879,7 +783,24 @@
     updateActionButtons();
   }
 
-  // ---------- BUTTONS / EVENTS ----------
+  // ---------------- EVENTS ----------------
+  function wireSorting() {
+    const headCells = document.querySelectorAll(".sortable");
+    headCells.forEach((cell) => {
+      cell.addEventListener("click", () => {
+        const key = cell.getAttribute("data-sort");
+        if (!key) return;
+        if (state.sortKey === key) state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+        else {
+          state.sortKey = key;
+          state.sortDir = "asc";
+        }
+        saveUiState();
+        render();
+      });
+    });
+  }
+
   function wireButtons() {
     if (backToLoginBtn)
       backToLoginBtn.addEventListener("click", () => {
@@ -913,7 +834,8 @@
 
     function openCreateModal() {
       closeCtx();
-      if (state.shareMode === "view" || state.shareToken) return;
+      const shareReadOnly = state.shareToken && state.shareRole !== "editor";
+      if (shareReadOnly) return;
       if (createModal) createModal.classList.remove("hidden");
     }
 
@@ -926,14 +848,15 @@
     if (createFolderBtn)
       createFolderBtn.addEventListener("click", () => {
         closeCreateModal();
-        createFolder().catch((e) => alert(e.message));
+        alert("Folder creation not wired here yet (you can add it similar to upload).");
       });
 
     if (createFileBtn)
       createFileBtn.addEventListener("click", () => {
         closeCreateModal();
         closeCtx();
-        if (state.shareMode === "view" || state.shareToken) return;
+        const shareReadOnly = state.shareToken && state.shareRole !== "editor";
+        if (shareReadOnly) return;
         if (filePicker) filePicker.click();
       });
 
@@ -955,7 +878,6 @@
     if (renameBtn) renameBtn.addEventListener("click", () => renameSelected().catch((e) => alert(e.message)));
     if (viewBtn) viewBtn.addEventListener("click", () => viewSelected().catch((e) => alert(e.message)));
     if (deleteBtn) deleteBtn.addEventListener("click", () => deleteSelected().catch((e) => alert(e.message)));
-    if (cloudBtn) cloudBtn.addEventListener("click", () => alert("Cloud clicked"));
 
     if (shareBtn) shareBtn.addEventListener("click", openShareModal);
     if (createShareBtn)
@@ -1003,15 +925,21 @@
       render();
     });
 
-  // ---------- INIT ----------
+  // ---------------- INIT ----------------
   loadUiState();
   applyShareFromUrl();
-  refreshProfileName();
 
-  wireButtons();
-  wireSorting();
-
-  refreshCurrentFolder().catch((e) => {
-    alert("Failed to load from API: " + e.message);
-  });
+  (async () => {
+    try {
+      await refreshProfileName();
+      if (state.shareToken) {
+        await loadShareMeta();
+      }
+      wireButtons();
+      wireSorting();
+      await refreshCurrentFolder();
+    } catch (e) {
+      alert("Failed to load from API: " + e.message);
+    }
+  })();
 })();

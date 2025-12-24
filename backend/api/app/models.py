@@ -16,9 +16,12 @@ class Item(Base):
     id = Column(Integer, primary_key=True)
     parent_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     name = Column(String, nullable=False)
-    type = Column(String, nullable=False)
+    type = Column(String, nullable=False)  # "folder" | "file"
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
     created_at = Column(DateTime, default=datetime.utcnow)
+    modified_at = Column(DateTime, default=datetime.utcnow)
+    modified_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     storage_path = Column(String, nullable=True)
     mime_type = Column(String, nullable=True)
@@ -26,13 +29,12 @@ class Item(Base):
 
     parent = relationship("Item", remote_side=[id])
 
-
 class ItemPermission(Base):
     __tablename__ = "item_permissions"
     id = Column(Integer, primary_key=True)
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    role = Column(String, nullable=False)
+    role = Column(String, nullable=False)  # viewer/editor
 
 class ShareLink(Base):
     __tablename__ = "share_links"
