@@ -36,7 +36,12 @@ app.add_middleware(
 STORAGE_DIR = os.path.join(os.path.dirname(__file__), ".", "storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    # Don't crash the whole API if DB isn't ready yet (cloud startup)
+    print("DB init skipped:", e)
+
 
 
 from fastapi.middleware.cors import CORSMiddleware
