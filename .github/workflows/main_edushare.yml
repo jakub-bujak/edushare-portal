@@ -38,9 +38,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: |
-            backend/api
-            !antenv/
+          path: backend/api
+
 
 
       # 🚫 Opting Out of Oryx Build
@@ -65,5 +64,6 @@ jobs:
         with:
           app-name: 'edushare'
           slot-name: 'Production'
-
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_B0A2FBC7CD8D4CF2AB51DB84F43ADC04 }}
+          package: .
+
