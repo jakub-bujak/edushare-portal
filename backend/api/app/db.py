@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DATABASE_URL = "sqlite:///./edushare.db"
+DATABASE_URL = "sqlite:////home/edushare.db"  # ✅ absolute path in /home
 
 engine = create_engine(
     DATABASE_URL,
