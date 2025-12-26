@@ -876,11 +876,29 @@
 
     if (uploadBtn) uploadBtn.addEventListener("click", openCreateModal);
 
-    if (createFolderBtn)
-      createFolderBtn.addEventListener("click", () => {
-        closeCreateModal();
-        alert("Folder creation not wired here yet (you can add it similar to upload).");
-      });
+    createFolderBtn.addEventListener("click", async () => {
+      closeCreateModal();
+
+      const shareReadOnly = state.shareToken && state.shareRole !== "editor";
+      if (shareReadOnly) return;
+
+      const name = prompt("Folder name:");
+      if (!name || !name.trim()) return;
+
+      try {
+        await apiFetch("/folders", {
+          method: "POST",
+          json: {
+            name: name.trim(),
+            parent_id: state.currentFolderId === "root" ? null : Number(state.currentFolderId),
+          },
+        });
+        await refreshCurrentFolder();
+      } catch (e) {
+        alert("Create folder failed: " + e.message);
+      }
+    });
+
 
     if (createFileBtn)
       createFileBtn.addEventListener("click", () => {
