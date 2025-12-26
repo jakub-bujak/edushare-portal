@@ -39,6 +39,22 @@ os.makedirs(STORAGE_DIR, exist_ok=True)
 Base.metadata.create_all(bind=engine)
 
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://jakub-bujak.github.io",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+
 # ----------------- HELPERS -----------------
 def upsert_user(db: Session, identity: dict) -> User:
     u = (
