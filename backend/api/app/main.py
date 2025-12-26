@@ -1,62 +1,57 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+
 import os
 import uuid
 from datetime import datetime, timedelta
-
 from sqlalchemy.orm import Session
 
-from .db import Base, engine, get_db
+from .db import get_db
 from .models import User, Item, ItemPermission, ShareLink
 from .schemas import ItemOut, CreateFolderIn, RenameIn, MoveIn, CreateShareLinkIn
 from .auth import get_current_user_stub
 from .permissions import get_effective_role, ROLE_ORDER
 
-from fastapi.middleware.cors import CORSMiddleware
+# ----------------- APP SETUP -----------------
+app = FastAPI(title="EduShare API")
 
-app = FastAPI(title="EduShare API (Local Dev)")
+# One single CORS middleware (no duplicates)
+FRONTEND_ORIGINS = [
+    # Local dev
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+
+    # GitHub Pages
+    "https://jakub-bujak.github.io",
+
+    # (Optional) Add your Azure Static Web Apps origin later, e.g.
+    # "https://<your-swa-name>.azurestaticapps.net",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-    ],
-    allow_credentials=False,
+    allow_origins=FRONTEND_ORIGINS,
+    allow_credentials=False,  # keep False unless you switch to cookie auth
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-STORAGE_DIR = os.path.join(os.path.dirname(__file__), ".", "storage")
-os.makedirs(STORAGE_DIR, exist_ok=True)
+# NOTE:
+# We are intentionally NOT doing:
+# - Base.metadata.create_all(...)
+# - local STORAGE_DIR creation
+# Because we're moving to Cosmos DB + Blob.
+#
+# For now, the DB dependency is still present (SQLAlchemy) so routes work
+# while we migrate route-by-route to Cosmos.
 
-try:
-    Base.metadata.create_all(bind=engine)
-except Exception as e:
-    # Don't crash the whole API if DB isn't ready yet (cloud startup)
-    print("DB init skipped:", e)
-
-
-
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://jakub-bujak.github.io",
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 
@@ -228,44 +223,10 @@ def upload_file(
     db: Session = Depends(get_db),
     identity: dict = Depends(get_current_user_stub),
 ):
-    user = upsert_user(db, identity)
-
-    folder = db.query(Item).filter(Item.id == folder_id, Item.type == "folder").first()
-    if not folder:
-        raise HTTPException(404, "Folder not found")
-
-    role = get_effective_role(db, user.id, folder)
-    if ROLE_ORDER[role] < ROLE_ORDER["editor"]:
-        raise HTTPException(403, "No permission to upload to this folder")
-
-    ext = os.path.splitext(file.filename)[1]
-    stored_name = f"{uuid.uuid4().hex}{ext}"
-    stored_path = os.path.join(STORAGE_DIR, stored_name)
-
-    contents = file.file.read()
-    with open(stored_path, "wb") as f:
-        f.write(contents)
-
-    now = datetime.utcnow()
-
-    item = Item(
-        parent_id=folder_id,
-        name=file.filename,
-        type="file",
-        owner_user_id=user.id,
-        storage_path=stored_path,
-        mime_type=file.content_type,
-        size_bytes=len(contents),
-        created_at=now,
-        modified_at=now,
-        modified_by_user_id=user.id,
+    raise HTTPException(
+        status_code=501,
+        detail="Upload not enabled yet (Blob Storage migration step)."
     )
-    db.add(item)
-    touch_modified(folder, user)
-    db.commit()
-    db.refresh(item)
-
-    return item_to_out(db, item)
 
 
 @app.get("/download/{file_id}")
@@ -274,24 +235,11 @@ def download_file(
     db: Session = Depends(get_db),
     identity: dict = Depends(get_current_user_stub),
 ):
-    user = upsert_user(db, identity)
-
-    item = db.query(Item).filter(Item.id == file_id, Item.type == "file").first()
-    if not item:
-        raise HTTPException(404, "File not found")
-
-    role = get_effective_role(db, user.id, item)
-    if ROLE_ORDER[role] < ROLE_ORDER["viewer"]:
-        raise HTTPException(403, "No permission to download this file")
-
-    if not item.storage_path or not os.path.exists(item.storage_path):
-        raise HTTPException(500, "Stored file missing on server")
-
-    return FileResponse(
-        path=item.storage_path,
-        filename=item.name,
-        media_type=item.mime_type or "application/octet-stream",
+    raise HTTPException(
+        status_code=501,
+        detail="Download not enabled yet (Blob Storage migration step)."
     )
+
 
 
 @app.post("/items/{item_id}/rename")
@@ -482,34 +430,10 @@ def share_download_file(
     db: Session = Depends(get_db),
     identity: dict = Depends(get_current_user_stub),
 ):
-    # Login required
-    upsert_user(db, identity)
-
-    require_share_role(db, token, "viewer")
-    root = share_root_item(db, token)
-
-    item = db.query(Item).filter(Item.id == file_id, Item.type == "file").first()
-    if not item:
-        raise HTTPException(404, "File not found")
-
-    # Must be inside shared subtree (root itself can be a folder OR file)
-    if root.type == "folder":
-        if not is_descendant(db, item.parent_id or -1, root.id):
-            raise HTTPException(403, "File is outside shared subtree")
-    else:
-        if item.id != root.id:
-            raise HTTPException(403, "This link does not grant access to that file")
-
-    if not item.storage_path or not os.path.exists(item.storage_path):
-        raise HTTPException(500, "Stored file missing on server")
-
-    resp = FileResponse(
-        path=item.storage_path,
-        filename=item.name,
-        media_type=item.mime_type or "application/octet-stream",
+    raise HTTPException(
+        status_code=501,
+        detail="Share download not enabled yet (Blob Storage migration step)."
     )
-    resp.headers["Cache-Control"] = "no-store"
-    return resp
 
 
 # ----------------- SHARE LINK EDITOR ACTIONS -----------------
@@ -580,44 +504,7 @@ def share_upload_file(
     db: Session = Depends(get_db),
     identity: dict = Depends(get_current_user_stub),
 ):
-    user = upsert_user(db, identity)
-    require_share_role(db, token, "editor")
-
-    root = share_root_item(db, token)
-    if root.type != "folder":
-        raise HTTPException(400, "Link is not for a folder")
-
-    if not is_descendant(db, folder_id, root.id):
-        raise HTTPException(403, "Folder is outside shared subtree")
-
-    folder = db.query(Item).filter(Item.id == folder_id, Item.type == "folder").first()
-    if not folder:
-        raise HTTPException(404, "Folder not found")
-
-    ext = os.path.splitext(file.filename)[1]
-    stored_name = f"{uuid.uuid4().hex}{ext}"
-    stored_path = os.path.join(STORAGE_DIR, stored_name)
-
-    contents = file.file.read()
-    with open(stored_path, "wb") as f:
-        f.write(contents)
-
-    now = datetime.utcnow()
-    item = Item(
-        parent_id=folder_id,
-        name=file.filename,
-        type="file",
-        owner_user_id=user.id,  # local dev: uploader is "owner" in this simple model
-        storage_path=stored_path,
-        mime_type=file.content_type,
-        size_bytes=len(contents),
-        created_at=now,
-        modified_at=now,
-        modified_by_user_id=user.id,
+    raise HTTPException(
+        status_code=501,
+        detail="Share upload not enabled yet (Blob Storage migration step)."
     )
-    db.add(item)
-    touch_modified(folder, user)
-    db.commit()
-    db.refresh(item)
-
-    return item_to_out(db, item)
