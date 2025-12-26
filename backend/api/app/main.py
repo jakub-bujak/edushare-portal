@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
-from .db import get_db
+from .db import get_db, Base, engine   # ✅ add Base + engine
 from .models import User, Item, ItemPermission, ShareLink
 from .schemas import ItemOut, CreateFolderIn, RenameIn, MoveIn, CreateShareLinkIn
 from .auth import get_current_user_stub
@@ -15,6 +15,9 @@ from .permissions import get_effective_role, ROLE_ORDER
 
 # ----------------- APP SETUP -----------------
 app = FastAPI(title="EduShare API")
+
+# ✅ Create tables automatically (fixes 500 on /me and /root in Azure)
+Base.metadata.create_all(bind=engine)
 
 # One single CORS middleware (no duplicates)
 FRONTEND_ORIGINS = [
@@ -28,7 +31,7 @@ FRONTEND_ORIGINS = [
     "http://localhost:8080",
     "http://127.0.0.1:8080",
 
-    # GitHub Pages
+    # GitHub Pages (origin is just the domain, not the /path)
     "https://jakub-bujak.github.io",
 
     # (Optional) Add your Azure Static Web Apps origin later, e.g.
@@ -42,6 +45,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # NOTE:
 # We are intentionally NOT doing:
